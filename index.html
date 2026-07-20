@@ -318,10 +318,17 @@ EIS.precipForRegion = function(region, n, dp){
   } else if (regionTempF < 36){                           // mixed
     type = regionTempF >= 33 ? 'sleet' : 'ice'; water='liquid'; rateInHr = round2(liquidEq);
   } else {                                                // liquid
-    if (unstable && liquidEq > 0.25){ type = (dp>0.75 && liquidEq>0.6) ? 'hail' : 'thunderstorm'; }
-    else if (p.lift <= 0.3 && liquidEq < 0.1){ type = EIS.classifyPrecip('drizzle', liquidEq); }
-    else { type = EIS.classifyPrecip('rain', liquidEq); }
-    water='liquid'; rateInHr = round2(liquidEq);
+    if (unstable && liquidEq > 0.25){
+      type = (dp>0.75 && liquidEq>0.6) ? 'hail' : 'thunderstorm'; water='liquid'; rateInHr = round2(liquidEq);
+    } else if (p.lift <= 0.3 && liquidEq < 0.12){
+      // weak, low-lift warm sector: humidity decides fog/mist/haze vs drizzle
+      if (n.h > 0.9) return mk('fog');
+      if (n.h > 0.8) return mk('mist');
+      if (n.h < 0.4) return mk('haze');
+      type = EIS.classifyPrecip('drizzle', liquidEq); water='liquid'; rateInHr = round2(liquidEq);
+    } else {
+      type = EIS.classifyPrecip('rain', liquidEq); water='liquid'; rateInHr = round2(liquidEq);
+    }
   }
   return { region, type, rateInHr, accumIn: round2(rateInHr*6), water };
 
@@ -339,7 +346,7 @@ EIS.formationOdds = function(n, dp, deficitFrac){
   return Math.round(EIS.clamp(100 * (0.30*n.s0 + dp*EIS.clamp(deficitFrac,0,1)), 0, 100));
 };
 EIS.phaseNote = function(trend24, deficitMb, depthMb, dying){
-  if (dying || deficitMb < 3) return 'dissipating';
+  if (dying) return 'dissipating';
   if (trend24 <= -24) return 'bombing out';
   if (trend24 < -3) return 'deepening';
   if (trend24 > 3) return 'occluding';
@@ -625,6 +632,17 @@ window.__eisTests.push((t) => {
     humidityPct:35, latitudeDeg:18, investStrength:15, surfaceTempF:72,
     advisoryISO:'2026-07-10T18:00'});
   t('weak summer barely develops', (1013 - Math.min(...summer.steps.map(s=>s.pressureMb))) < 14);
+});
+
+window.__eisTests.push((t) => {
+  const wk = (h) => EIS.normalizeInputs({...EIS.DEFAULT_INPUTS,
+    baroclinicity:5, shearMph:70, humidityPct:h, latitudeDeg:15, surfaceTempF:70,
+    advisoryISO:'2026-07-10T18:00'});
+  const fogN = wk(95), mistN = wk(85), hazeN = wk(30);
+  t('fog reachable',  EIS.precipForRegion('Warm sector', fogN,  EIS.developmentPotential(fogN)).type  === 'fog');
+  t('mist reachable', EIS.precipForRegion('Warm sector', mistN, EIS.developmentPotential(mistN)).type === 'mist');
+  t('haze reachable', EIS.precipForRegion('Warm sector', hazeN, EIS.developmentPotential(hazeN)).type === 'haze');
+  t('phaseNote genesis = organizing', EIS.phaseNote(0, 0, 45, false) === 'organizing');
 });
 
 EIS.init = function(){
