@@ -308,6 +308,19 @@ EIS.precipForRegion = function(region, n, dp){
 EIS.precipByRegion = function(n, dp){
   return EIS.REGIONS.map(r => EIS.precipForRegion(r, n, dp)).filter(Boolean);
 };
+
+// deficitFrac = current pressure deficit / max depth (0..1). Odds track organization,
+// peaking with intensity and falling as the low fills.
+EIS.formationOdds = function(n, dp, deficitFrac){
+  return Math.round(EIS.clamp(100 * (0.30*n.s0 + dp*EIS.clamp(deficitFrac,0,1)), 0, 100));
+};
+EIS.phaseNote = function(trend24, deficitMb, depthMb, dying){
+  if (dying || deficitMb < 3) return 'dissipating';
+  if (trend24 <= -24) return 'bombing out';
+  if (trend24 < -3) return 'deepening';
+  if (trend24 > 3) return 'occluding';
+  return deficitMb > 0.6*depthMb ? 'at peak' : 'organizing';
+};
 /* ================= MAP (Task 10) ================= */
 /* ================= UI (Tasks 11-13) ================= */
 
@@ -346,6 +359,19 @@ window.__eisTests.push((t) => {
   const dpS = EIS.developmentPotential(summer);
   const srows = EIS.precipByRegion(summer, dpS);
   t('summer mostly liquid', srows.every(r => EIS.PRECIP_META[r.type].water !== 'snow'));
+});
+
+window.__eisTests.push((t) => {
+  const n = EIS.normalizeInputs({...EIS.DEFAULT_INPUTS, baroclinicity:90, shearMph:20});
+  const dp = EIS.developmentPotential(n);
+  const early = EIS.formationOdds(n, dp, 0.2);
+  const peak  = EIS.formationOdds(n, dp, 1.0);
+  const late  = EIS.formationOdds(n, dp, 0.15);
+  t('odds rise toward peak', peak > early);
+  t('odds bounded 0..100', peak <= 100 && late >= 0);
+  t('bombing note at big drop', EIS.phaseNote(-26, 40, 45, false) === 'bombing out');
+  t('dissipating when dying', EIS.phaseNote(5, 2, 45, true) === 'dissipating');
+  t('deepening note', EIS.phaseNote(-8, 20, 45, false) === 'deepening');
 });
 
 /* ================= SELF-TEST HARNESS ================= */
