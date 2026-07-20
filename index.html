@@ -30,6 +30,24 @@
   aside input,aside select{width:100%;margin-top:3px;background:var(--panel2);border:1px solid var(--edge);color:var(--ink);border-radius:5px;padding:6px}
   aside input[type=range]{padding:0}
   aside output{color:var(--accent);font-weight:700}
+  main #map{margin-bottom:14px}
+  .step{background:var(--panel);border:1px solid var(--edge);border-left:4px solid var(--accentwarm);border-radius:8px;margin:8px 0}
+  .step-head{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:10px 12px;cursor:pointer}
+  .step-head .tt{font-weight:700;color:#e2e8f0}
+  .pill{font-size:11px;padding:2px 8px;border-radius:20px;background:var(--edge);color:#9fc3e8}
+  .pill.warm{background:#7c2d12;color:#fdba74}
+  .step-body{display:none;padding:0 12px 12px}
+  .step.open .step-body{display:block}
+  .metrics{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:8px 0}
+  @media (max-width:560px){.metrics{grid-template-columns:repeat(2,1fr)}}
+  .metric{background:var(--panel2);border-radius:6px;padding:8px 10px}
+  .metric .k{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--head)}
+  .metric .v{font-size:15px;font-weight:700;color:#e2e8f0}
+  .metric .s{font-size:10px;color:var(--ink2)}
+  table.precip{width:100%;border-collapse:collapse;font-size:12px}
+  table.precip th{text-align:left;color:var(--head);font-size:10px;text-transform:uppercase;padding:4px 6px;border-bottom:1px solid var(--edge)}
+  table.precip td{padding:5px 6px;border-bottom:1px solid var(--panel2)}
+  .totals{text-align:right;color:var(--ink2);font-size:12px;margin-top:8px}
 </style>
 </head>
 <body>
@@ -471,6 +489,48 @@ EIS.readForm = function(aside){
   };
 };
 
+EIS.fmtDate = function(iso){
+  const d = new Date(iso);
+  return d.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'numeric'});
+};
+EIS.renderTimeline = function(main, result){
+  const rows = result.steps.map((s,i)=>{
+    const peak = i===result.peakIndex ? ' ★' : '';
+    const regionRows = s.regions.map(rg=>{
+      const m = EIS.PRECIP_META[rg.type];
+      const amt = rg.water==='none' ? '—' :
+        rg.rateInHr+' in/hr &middot; '+rg.accumIn+' in';
+      return `<tr><td>${rg.region}</td>
+        <td style="color:${m.color};font-weight:600">${m.emoji} ${m.label}</td>
+        <td>${amt}</td></tr>`;
+    }).join('');
+    const trend = s.pressureTrend24<=0 ? '▼ '+Math.abs(s.pressureTrend24) : '▲ '+s.pressureTrend24;
+    return `<div class="step" data-i="${i}">
+      <div class="step-head" onclick="this.parentNode.classList.toggle('open')">
+        <span class="tt">+${s.tHours}h &middot; ${EIS.fmtDate(s.date)}${peak}</span>
+        <span class="pill">\u{1F300} ${s.formationPct}%</span>
+        <span class="pill">${s.pressureMb} mb</span>
+        <span class="pill">${s.coreTempF}°F ${s.coreTag}</span>
+        <span class="pill warm">${s.phaseNote}</span>
+      </div>
+      <div class="step-body">
+        <div class="metrics">
+          <div class="metric"><div class="k">Core pressure</div><div class="v">${s.pressureMb} mb</div><div class="s">${trend} mb/24h</div></div>
+          <div class="metric"><div class="k">Winds</div><div class="v">${s.windMph} mph</div><div class="s">gusts ${s.gustMph}</div></div>
+          <div class="metric"><div class="k">Size</div><div class="v">${s.sizeMi} mi</div><div class="s">gale radius &middot; ${s.sizeCat}</div></div>
+          <div class="metric"><div class="k">Location</div><div class="v">${s.lat}°, ${s.lon}°</div><div class="s">moving ${s.headingDeg}° @ ${s.speedMph} mph</div></div>
+          <div class="metric"><div class="k">Core temp</div><div class="v">${s.coreTempF}°F</div><div class="s">${s.coreTag}</div></div>
+          <div class="metric"><div class="k">Formation</div><div class="v">${s.formationPct}%</div><div class="s">${s.phaseNote}</div></div>
+        </div>
+        <table class="precip"><tr><th>Region</th><th>Type</th><th>Rate / accum</th></tr>${regionRows}</table>
+        <div class="totals">Storm totals — snow ${s.stormTotals.snowIn} in &middot; liquid ${s.stormTotals.liquidIn} in</div>
+      </div>
+    </div>`;
+  }).join('');
+  main.querySelector('#timeline').innerHTML = rows;
+  main.querySelector('.step')?.classList.add('open'); // first step expanded
+};
+
 window.__eisTests.push((t, approx) => {
   const W=800, H=400;
   const c = EIS.project(0, 0, W, H);      // lon0/lat0 -> center
@@ -556,6 +616,32 @@ window.__eisTests.push((t) => {
     advisoryISO:'2026-07-10T18:00'});
   t('weak summer barely develops', (1013 - Math.min(...summer.steps.map(s=>s.pressureMb))) < 14);
 });
+
+EIS.init = function(){
+  if (/(\?|&)selftest\b/.test(location.search)) return; // harness owns the page
+  const aside = document.getElementById('inputs');
+  const main = document.getElementById('results');
+  main.innerHTML = '<div id="map"></div><div id="timeline"></div>';
+  EIS.buildForm(aside);
+  function run(){
+    const result = EIS.simulate(EIS.readForm(aside));
+    EIS.renderMap(main.querySelector('#map'), result.steps);
+    EIS.renderTimeline(main, result);
+  }
+  aside.querySelector('#f_run').addEventListener('click', run);
+  // Let the user set the start point by clicking the map.
+  main.querySelector('#map').addEventListener('click', (e)=>{
+    const svg = e.target.closest('svg'); if(!svg) return;
+    const r = svg.getBoundingClientRect();
+    const lon = (e.clientX - r.left)/r.width*360 - 180;
+    const lat = 90 - (e.clientY - r.top)/r.height*180;
+    aside.querySelector('#f_lonDeg').value = Math.round(lon*10)/10;
+    aside.querySelector('#f_latitudeDeg').value = Math.round(lat*10)/10;
+    run();
+  });
+  run(); // initial simulation on load
+};
+EIS.init();
 
 /* ================= SELF-TEST HARNESS ================= */
 (function(){
