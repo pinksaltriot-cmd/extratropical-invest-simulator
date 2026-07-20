@@ -262,6 +262,52 @@ EIS.coreTemp = function(n, ageFrac, dp){
   const tag = warmSeclusion ? 'warm seclusion' : 'cold-core';
   return { tempF, tag };
 };
+EIS.classifyPrecip = function(kind, rateInHr){
+  if (kind === 'rain')    return rateInHr > 0.3 ? 'heavyrain'  : rateInHr >= 0.1  ? 'modrain'    : 'lightrain';
+  if (kind === 'snow')    return rateInHr > 1.5 ? 'heavysnow'  : rateInHr >= 0.5  ? 'modsnow'    : 'lightsnow';
+  if (kind === 'drizzle') return rateInHr > 0.05? 'heavydrizzle':rateInHr >= 0.02 ? 'moddrizzle' : 'lightdrizzle';
+  return 'lightrain';
+};
+
+EIS.precipForRegion = function(region, n, dp){
+  const p = EIS.REGION_PROPS[region];
+  const seaF = EIS.seasonFactor(n.month, n.lat);
+  const regionTempF = n.tempF + p.tempOffset - 25*seaF*(Math.abs(n.lat)/90);
+  // Liquid-equivalent precip rate (in/hr).
+  const liquidEq = EIS.clamp(dp * n.h * p.lift * 2.2, 0, 3);
+
+  if (liquidEq < 0.005){
+    // Non-precipitating obscuration.
+    if (n.h > 0.9) return mk('fog');
+    if (n.h > 0.75) return mk('mist');
+    if (n.h < 0.4) return mk('haze');
+    return null;
+  }
+  const unstable = p.convective && n.tempF > 45 && dp > 0.5;
+  let type, water, rateInHr;
+  if (regionTempF < 30){                                  // frozen
+    const snowRate = liquidEq * 10;
+    if (p.convective && dp > 0.6 && snowRate > 0.5){ type='thundersnow'; }
+    else if (snowRate < 0.15 && p.lift < 0.4){ type='snowgrains'; }
+    else { type = EIS.classifyPrecip('snow', snowRate); }
+    water='snow'; rateInHr = round2(snowRate);
+  } else if (regionTempF < 36){                           // mixed
+    type = regionTempF >= 33 ? 'sleet' : 'ice'; water='liquid'; rateInHr = round2(liquidEq);
+  } else {                                                // liquid
+    if (unstable && liquidEq > 0.25){ type = (dp>0.75 && liquidEq>0.6) ? 'hail' : 'thunderstorm'; }
+    else if (p.lift <= 0.3 && liquidEq < 0.1){ type = EIS.classifyPrecip('drizzle', liquidEq); }
+    else { type = EIS.classifyPrecip('rain', liquidEq); }
+    water='liquid'; rateInHr = round2(liquidEq);
+  }
+  return { region, type, rateInHr, accumIn: round2(rateInHr*6), water };
+
+  function mk(id){ return { region, type:id, rateInHr:0, accumIn:0, water:'none' }; }
+  function round2(x){ return Math.round(x*100)/100; }
+};
+
+EIS.precipByRegion = function(n, dp){
+  return EIS.REGIONS.map(r => EIS.precipForRegion(r, n, dp)).filter(Boolean);
+};
 /* ================= MAP (Task 10) ================= */
 /* ================= UI (Tasks 11-13) ================= */
 
@@ -275,6 +321,31 @@ window.__eisTests.push((t, approx) => {
     surfaceTempF:40, latitudeDeg:55, advisoryISO:'2026-01-10T18:00'}), 0.3, 0.8);
   t('cold-core colder than surface', cold.tempF < 40);
   t('cold tag', /core/.test(cold.tag));
+});
+
+window.__eisTests.push((t) => {
+  t('classify rain heavy', EIS.classifyPrecip('rain', 0.5) === 'heavyrain');
+  t('classify rain light', EIS.classifyPrecip('rain', 0.05) === 'lightrain');
+  t('classify snow moderate', EIS.classifyPrecip('snow', 1.0) === 'modsnow');
+  t('classify drizzle light', EIS.classifyPrecip('drizzle', 0.01) === 'lightdrizzle');
+
+  const winter = EIS.normalizeInputs({...EIS.DEFAULT_INPUTS,
+    surfaceTempF:34, baroclinicity:95, humidityPct:90, latitudeDeg:48,
+    advisoryISO:'2026-01-10T18:00'});
+  const dpW = EIS.developmentPotential(winter);
+  const rows = EIS.precipByRegion(winter, dpW);
+  const byRegion = Object.fromEntries(rows.map(r => [r.region, r]));
+  t('produces multiple regions', rows.length >= 3);
+  t('comma head is frozen/heavy', /snow/.test(byRegion['Comma head'].type));
+  t('cold front convective', ['thunderstorm','thundersnow','hail']
+      .includes(byRegion['Cold front'].type) || /rain|snow/.test(byRegion['Cold front'].type));
+
+  const summer = EIS.normalizeInputs({...EIS.DEFAULT_INPUTS,
+    surfaceTempF:70, baroclinicity:20, humidityPct:40, latitudeDeg:20,
+    advisoryISO:'2026-07-10T18:00'});
+  const dpS = EIS.developmentPotential(summer);
+  const srows = EIS.precipByRegion(summer, dpS);
+  t('summer mostly liquid', srows.every(r => EIS.PRECIP_META[r.type].water !== 'snow'));
 });
 
 /* ================= SELF-TEST HARNESS ================= */
