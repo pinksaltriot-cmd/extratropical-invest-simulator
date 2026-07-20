@@ -64,6 +64,18 @@ window.__eisTests.push((t) => {
      EIS.DEFAULT_INPUTS.surfaceType === 'sea');
 });
 
+window.__eisTests.push((t, approx) => {
+  const n = EIS.normalizeInputs(EIS.DEFAULT_INPUTS);
+  t('normalize b in 0..1', approx(n.b, 0.70, 1e-6));
+  t('normalize month parsed', n.month === 1);
+  t('season: NH January is high', EIS.seasonFactor(1, 44) > 0.9);
+  t('season: NH July is low', EIS.seasonFactor(7, 44) < 0.1);
+  t('season: SH flips', EIS.seasonFactor(7, -44) > 0.9);
+  t('shear sweet spot ~20mph = 1', approx(EIS.shearFactor(20), 1, 1e-6));
+  t('shear too high penalized', EIS.shearFactor(70) < 0.2);
+  t('shear too low penalized', EIS.shearFactor(0) < EIS.shearFactor(20));
+});
+
 /* ================= CONSTANTS (Task 1) ================= */
 EIS.PRECIP_META = {
   lightrain:    {label:'Light rain',    emoji:'\u{1F327}️', color:'var(--rain)',    water:'liquid'},
@@ -100,6 +112,38 @@ EIS.DEFAULT_INPUTS = {
   advisoryISO:'2026-01-10T18:00',
 };
 /* ================= ENGINE (Tasks 2-9) ================= */
+EIS.clamp = (x,lo,hi) => Math.max(lo, Math.min(hi, x));
+
+EIS.normalizeInputs = function(raw){
+  const d = new Date(raw.advisoryISO);
+  const month = (isNaN(d) ? 1 : d.getMonth()+1);
+  return {
+    surfaceType: raw.surfaceType,
+    tempF: +raw.surfaceTempF,
+    b: EIS.clamp(+raw.baroclinicity/100, 0, 1),
+    shearMph: +raw.shearMph,
+    h: EIS.clamp(+raw.humidityPct/100, 0, 1),
+    lat: +raw.latitudeDeg,
+    lon: +raw.lonDeg,
+    dir: +raw.steeringDirDeg,
+    spd: +raw.steeringMph,
+    s0: EIS.clamp(+raw.investStrength/100, 0, 1),
+    month, date: (isNaN(d) ? new Date('2026-01-10T18:00') : d),
+  };
+};
+
+// 1 = deep winter for that hemisphere, 0 = deep summer.
+EIS.seasonFactor = function(month, latitudeDeg){
+  const north = latitudeDeg >= 0;
+  // NH coldest at Jan (month 1); SH coldest at Jul (month 7).
+  const phase = north ? (month - 1) : (month - 7);
+  return 0.5 + 0.5 * Math.cos(phase / 12 * 2 * Math.PI);
+};
+
+// Sweet spot at 20 mph; falls off both ways, floored at 0.
+EIS.shearFactor = function(shearMph){
+  return EIS.clamp(1 - Math.pow((shearMph - 20) / 35, 2), 0, 1);
+};
 /* ================= MAP (Task 10) ================= */
 /* ================= UI (Tasks 11-13) ================= */
 
