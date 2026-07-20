@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Extratropical Invest Simulator</title>
+<style>
+  :root{
+    --bg:#061625; --panel:#0d1b2a; --panel2:#12293f; --edge:#1b3a5b;
+    --ink:#cbd5e1; --ink2:#94a3b8; --accent:#4f9cf9; --accentwarm:#f97316;
+    --head:#7fb3cc;
+    --snow:#93c5fd; --rain:#6ee7b7; --thunder:#fbbf24; --drizzle:#5eead4;
+    --ice:#c084fc; --sleet:#fbbf24; --mist:#a5f3fc; --neutral:#9ca3af;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+  header{padding:12px 18px;border-bottom:1px solid var(--edge);display:flex;align-items:center;gap:10px}
+  header h1{font-size:16px;margin:0;font-weight:700;color:#e2e8f0}
+  header .sub{color:var(--ink2);font-size:12px}
+  .app{display:flex;align-items:stretch;min-height:calc(100vh - 49px)}
+  aside{flex:0 0 320px;border-right:1px solid var(--edge);padding:14px;overflow:auto}
+  main{flex:1;padding:14px;overflow:auto}
+  @media (max-width:820px){ .app{flex-direction:column} aside{flex:none;border-right:none;border-bottom:1px solid var(--edge)} }
+  h2.sec{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--head);margin:16px 0 8px}
+  .selftest{max-width:720px;margin:0 auto;padding:20px;font-family:ui-monospace,Menlo,monospace}
+  .selftest .pass{color:#4ade80}.selftest .fail{color:#f87171}
+  .selftest .sum{font-size:18px;font-weight:700;margin-bottom:12px}
+</style>
+</head>
+<body>
+<header>
+  <span style="font-size:20px">🌀</span>
+  <h1>Extratropical Invest Simulator</h1>
+  <span class="sub">deterministic cold-core life-cycle model</span>
+</header>
+
+<div class="app" id="app">
+  <aside id="inputs"><!-- Task 11 --></aside>
+  <main id="results"><!-- Task 10 + 12 --></main>
+</div>
+
+<div class="selftest" id="selftest" style="display:none"></div>
+
+<script>
+"use strict";
+const EIS = {};
+window.__eisTests = window.__eisTests || [];
+
+window.__eisTests.push((t) => {
+  t('harness alive', 1 + 1 === 2);
+});
+
+/* ================= CONSTANTS (Task 1) ================= */
+/* ================= ENGINE (Tasks 2-9) ================= */
+/* ================= MAP (Task 10) ================= */
+/* ================= UI (Tasks 11-13) ================= */
+
+/* ================= SELF-TEST HARNESS ================= */
+(function(){
+  if (!/(\?|&)selftest\b/.test(location.search)) return;
+  document.getElementById('app').style.display='none';
+  const el = document.getElementById('selftest'); el.style.display='block';
+  let pass=0, fail=0; const rows=[];
+  function approx(a,b,tol){ return Math.abs(a-b) <= (tol==null?1e-6:tol); }
+  function t(name, cond){
+    if (cond){ pass++; rows.push('<div class="pass">✓ '+name+'</div>'); }
+    else { fail++; rows.push('<div class="fail">✗ '+name+'</div>'); }
+  }
+  window.__eisTest = { t, approx };
+  try { (window.__eisTests||[]).forEach(fn => fn(t, approx)); }
+  catch(e){ fail++; rows.push('<div class="fail">✗ threw: '+e.message+'</div>'); }
+  const total = pass+fail;
+  el.innerHTML = '<div class="sum '+(fail?'fail':'pass')+'">SELFTEST '+pass+'/'+total+' '+(fail?'FAIL':'PASS')+'</div>'+rows.join('');
+  console.log('SELFTEST '+pass+'/'+total+' '+(fail?'FAIL':'PASS'));
+})();
+</script>
+</body>
+</html>
