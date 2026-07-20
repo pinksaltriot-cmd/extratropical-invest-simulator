@@ -6,6 +6,7 @@
 <title>Extratropical Invest Simulator</title>
 <style>
   :root{
+    color-scheme: dark;
     --bg:#061625; --panel:#0d1b2a; --panel2:#12293f; --edge:#1b3a5b;
     --ink:#cbd5e1; --ink2:#94a3b8; --accent:#4f9cf9; --accentwarm:#f97316;
     --head:#7fb3cc;
@@ -66,9 +67,10 @@ window.__eisTests.push((t) => {
     if (cond){ pass++; rows.push('<div class="pass">✓ '+name+'</div>'); }
     else { fail++; rows.push('<div class="fail">✗ '+name+'</div>'); }
   }
-  window.__eisTest = { t, approx };
-  try { (window.__eisTests||[]).forEach(fn => fn(t, approx)); }
-  catch(e){ fail++; rows.push('<div class="fail">✗ threw: '+e.message+'</div>'); }
+  (window.__eisTests||[]).forEach((fn, gi) => {
+    try { fn(t, approx); }
+    catch(e){ fail++; rows.push('<div class="fail">✗ test group #'+gi+' threw: '+((e && e.message) || String(e))+'</div>'); }
+  });
   const total = pass+fail;
   el.innerHTML = '<div class="sum '+(fail?'fail':'pass')+'">SELFTEST '+pass+'/'+total+' '+(fail?'FAIL':'PASS')+'</div>'+rows.join('');
   console.log('SELFTEST '+pass+'/'+total+' '+(fail?'FAIL':'PASS'));
