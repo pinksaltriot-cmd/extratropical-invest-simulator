@@ -107,6 +107,16 @@ window.__eisTests.push((t, approx) => {
   t('death after peak', ps.tDeathH > ps.tPeakH);
 });
 
+window.__eisTests.push((t, approx) => {
+  const w40 = EIS.windFromDeficit(40), w10 = EIS.windFromDeficit(10);
+  t('deeper = stronger', w40.sustained > w10.sustained);
+  t('gust > sustained', w40.gust > w40.sustained);
+  t('40mb ~ 76 mph', approx(w40.sustained, 76, 3));
+  const small = EIS.sizeAt(20, 0.1), big = EIS.sizeAt(40, 0.9);
+  t('grows with maturity/depth', big.radiusMi > small.radiusMi);
+  t('category labels', ['compact','average','broad'].includes(big.category));
+});
+
 /* ================= CONSTANTS (Task 1) ================= */
 EIS.PRECIP_META = {
   lightrain:    {label:'Light rain',    emoji:'\u{1F327}️', color:'var(--rain)',    water:'liquid'},
@@ -211,6 +221,21 @@ EIS.pressureProfile = function(n){
     tDeathH = th;
   }
   return { ambient, depthMb, tPeakH, tDeathH, deficitAt, pressureAt, dp };
+};
+// Pressure-wind relation: sustained wind (mph) scales with sqrt of the
+// central-pressure deficit vs ambient; gust factor 1.35x sustained.
+EIS.windFromDeficit = function(deficitMb){
+  const sustained = 12 * Math.sqrt(Math.max(0, deficitMb));  // mph
+  return { sustained: Math.round(sustained), gust: Math.round(sustained*1.35) };
+};
+
+// Wind-field radius (mi): grows with both depth (deficitMb) and maturity
+// (ageFrac, 0..1 through the life cycle). Category label from size bands.
+EIS.sizeAt = function(deficitMb, ageFrac){
+  const radius = 60 + deficitMb*3 + EIS.clamp(ageFrac,0,1)*90;
+  const radiusMi = Math.round(radius);
+  const category = radiusMi < 120 ? 'compact' : radiusMi <= 260 ? 'average' : 'broad';
+  return { radiusMi, category };
 };
 /* ================= MAP (Task 10) ================= */
 /* ================= UI (Tasks 11-13) ================= */
