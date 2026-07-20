@@ -237,8 +237,45 @@ EIS.sizeAt = function(deficitMb, ageFrac){
   const category = radiusMi < 120 ? 'compact' : radiusMi <= 260 ? 'average' : 'broad';
   return { radiusMi, category };
 };
+// dirDeg: compass heading the system moves toward (0=N,90=E). Adds modest
+// poleward + eastward drift typical of extratropical lows.
+EIS.advanceTrack = function(lat, lon, dirDeg, spdMph, dtH, dp){
+  const distMi = spdMph * dtH;
+  const br = dirDeg * Math.PI/180;
+  const latRad = lat * Math.PI/180;
+  let dLat = (distMi * Math.cos(br)) / 69;
+  let dLon = (distMi * Math.sin(br)) / (69 * Math.max(0.2, Math.cos(latRad)));
+  const pole = lat >= 0 ? 1 : -1;
+  dLat += pole * (0.15 + 0.4*dp);   // beta / poleward drift
+  dLon += 0.35 + 0.3*dp;            // eastward drift
+  const nlat = EIS.clamp(lat + dLat, -85, 85);
+  let nlon = lon + dLon; if (nlon > 180) nlon -= 360; if (nlon < -180) nlon += 360;
+  const headingDeg = (Math.atan2(dLon*Math.cos(latRad), dLat) * 180/Math.PI + 360) % 360;
+  const speedMph = Math.round((Math.hypot(dLat*69, dLon*69*Math.cos(latRad)))/dtH);
+  return { lat:nlat, lon:nlon, headingDeg:Math.round(headingDeg), speedMph };
+};
+EIS.coreTemp = function(n, ageFrac, dp){
+  const seaF = EIS.seasonFactor(n.month, n.lat);
+  const tempF = Math.round(n.tempF - (15 + 25*seaF + 0.4*Math.abs(n.lat)));
+  // Near peak, a strong system can warm-seclude its core.
+  const warmSeclusion = dp > 0.7 && ageFrac > 0.45 && ageFrac < 0.75;
+  const tag = warmSeclusion ? 'warm seclusion' : 'cold-core';
+  return { tempF, tag };
+};
 /* ================= MAP (Task 10) ================= */
 /* ================= UI (Tasks 11-13) ================= */
+
+window.__eisTests.push((t, approx) => {
+  // Pure east steering (dir=90) at 30 mph for 6 h ~ 180 mi ~ 2.6° lon at 44N.
+  const a = EIS.advanceTrack(44, -58, 90, 30, 6, 0.5);
+  t('moves east', a.lon > -58);
+  t('lat drifts poleward (north)', a.lat > 44);
+  t('heading reported', a.headingDeg >= 0 && a.headingDeg <= 360);
+  const cold = EIS.coreTemp(EIS.normalizeInputs({...EIS.DEFAULT_INPUTS,
+    surfaceTempF:40, latitudeDeg:55, advisoryISO:'2026-01-10T18:00'}), 0.3, 0.8);
+  t('cold-core colder than surface', cold.tempF < 40);
+  t('cold tag', /core/.test(cold.tag));
+});
 
 /* ================= SELF-TEST HARNESS ================= */
 (function(){
