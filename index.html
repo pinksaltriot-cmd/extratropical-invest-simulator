@@ -76,6 +76,20 @@ window.__eisTests.push((t, approx) => {
   t('shear too low penalized', EIS.shearFactor(0) < EIS.shearFactor(20));
 });
 
+window.__eisTests.push((t) => {
+  const strongWinter = EIS.normalizeInputs({...EIS.DEFAULT_INPUTS,
+    baroclinicity:95, shearMph:20, humidityPct:90, latitudeDeg:48, advisoryISO:'2026-01-10T18:00'});
+  const weakSummer = EIS.normalizeInputs({...EIS.DEFAULT_INPUTS,
+    baroclinicity:10, shearMph:5, humidityPct:30, latitudeDeg:15, advisoryISO:'2026-07-10T18:00'});
+  const dpStrong = EIS.developmentPotential(strongWinter);
+  const dpWeak = EIS.developmentPotential(weakSummer);
+  t('strong winter DP high', dpStrong > 0.75);
+  t('weak summer DP low', dpWeak < 0.30);
+  t('excessive shear kills DP', EIS.developmentPotential(
+      {...strongWinter, shearMph:75}) < dpStrong * 0.7);
+  t('DP bounded 0..1', dpStrong <= 1 && dpWeak >= 0);
+});
+
 /* ================= CONSTANTS (Task 1) ================= */
 EIS.PRECIP_META = {
   lightrain:    {label:'Light rain',    emoji:'\u{1F327}️', color:'var(--rain)',    water:'liquid'},
@@ -143,6 +157,16 @@ EIS.seasonFactor = function(month, latitudeDeg){
 // Sweet spot at 20 mph; falls off both ways, floored at 0.
 EIS.shearFactor = function(shearMph){
   return EIS.clamp(1 - Math.pow((shearMph - 20) / 35, 2), 0, 1);
+};
+
+// Composite 0..1 development-potential score: baroclinicity + humidity +
+// latitude sweet spot (~50°) + seasonal favorability, tempered by shear.
+EIS.developmentPotential = function(n){
+  const latF = EIS.clamp(1 - Math.pow((Math.abs(n.lat) - 50) / 40, 2), 0.1, 1);
+  const seaF = EIS.seasonFactor(n.month, n.lat);
+  const shearF = EIS.shearFactor(n.shearMph);
+  const base = 0.50*n.b + 0.15*n.h + 0.20*latF + 0.15*seaF; // 0..1
+  return EIS.clamp(base * (0.4 + 0.6*shearF), 0, 1);
 };
 /* ================= MAP (Task 10) ================= */
 /* ================= UI (Tasks 11-13) ================= */
