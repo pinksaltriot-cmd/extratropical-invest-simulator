@@ -51,7 +51,54 @@ window.__eisTests.push((t) => {
   t('harness alive', 1 + 1 === 2);
 });
 
+window.__eisTests.push((t) => {
+  const ids = ['lightrain','modrain','heavyrain','lightsnow','modsnow','heavysnow',
+    'lightdrizzle','moddrizzle','heavydrizzle','ice','sleet','snowgrains','hail',
+    'thunderstorm','thundersnow','fog','haze','mist'];
+  t('18 precip types defined', ids.length === 18 && ids.every(id => EIS.PRECIP_META[id]));
+  t('each precip has label+color+emoji', ids.every(id => {
+    const m = EIS.PRECIP_META[id]; return m.label && m.color && m.emoji;
+  }));
+  t('4 regions defined', EIS.REGIONS.length === 4 && EIS.REGIONS[0] === 'Comma head');
+  t('input defaults present', EIS.DEFAULT_INPUTS.baroclinicity === 70 &&
+     EIS.DEFAULT_INPUTS.surfaceType === 'sea');
+});
+
 /* ================= CONSTANTS (Task 1) ================= */
+EIS.PRECIP_META = {
+  lightrain:    {label:'Light rain',    emoji:'\u{1F327}️', color:'var(--rain)',    water:'liquid'},
+  modrain:      {label:'Moderate rain', emoji:'\u{1F327}️', color:'var(--rain)',    water:'liquid'},
+  heavyrain:    {label:'Heavy rain',    emoji:'\u{1F327}️', color:'var(--rain)',    water:'liquid'},
+  lightsnow:    {label:'Light snow',    emoji:'❄️',    color:'var(--snow)',    water:'snow'},
+  modsnow:      {label:'Moderate snow', emoji:'❄️',    color:'var(--snow)',    water:'snow'},
+  heavysnow:    {label:'Heavy snow',    emoji:'❄️',    color:'var(--snow)',    water:'snow'},
+  lightdrizzle: {label:'Light drizzle', emoji:'\u{1F326}️', color:'var(--drizzle)', water:'liquid'},
+  moddrizzle:   {label:'Moderate drizzle',emoji:'\u{1F326}️',color:'var(--drizzle)',water:'liquid'},
+  heavydrizzle: {label:'Heavy drizzle', emoji:'\u{1F326}️', color:'var(--drizzle)', water:'liquid'},
+  ice:          {label:'Ice / freezing rain', emoji:'\u{1F9CA}', color:'var(--ice)',    water:'liquid'},
+  sleet:        {label:'Sleet',         emoji:'⛈️',    color:'var(--sleet)',   water:'liquid'},
+  snowgrains:   {label:'Snow grains',   emoji:'❄️',    color:'var(--snow)',    water:'snow'},
+  hail:         {label:'Hail',          emoji:'\u{1F327}️', color:'var(--thunder)', water:'liquid'},
+  thunderstorm: {label:'Thunderstorms', emoji:'⛈️',    color:'var(--thunder)', water:'liquid'},
+  thundersnow:  {label:'Thundersnow',   emoji:'⛈️',    color:'var(--thunder)', water:'snow'},
+  fog:          {label:'Fog',           emoji:'\u{1F32B}️', color:'var(--neutral)', water:'none'},
+  haze:         {label:'Haze',          emoji:'\u{1F301}',       color:'var(--neutral)', water:'none'},
+  mist:         {label:'Mist',          emoji:'\u{1F4A7}',       color:'var(--mist)',    water:'none'},
+};
+EIS.REGIONS = ['Comma head','Warm front','Cold front','Warm sector'];
+// Per-region physical character: lift (precip efficiency), tempOffset (°F vs storm env),
+// convective flag (can produce thunder/thundersnow/hail).
+EIS.REGION_PROPS = {
+  'Comma head':  {lift:1.00, tempOffset:-12, convective:true},
+  'Warm front':  {lift:0.60, tempOffset:-4,  convective:false},
+  'Cold front':  {lift:0.80, tempOffset:-2,  convective:true},
+  'Warm sector': {lift:0.25, tempOffset:+6,  convective:false},
+};
+EIS.DEFAULT_INPUTS = {
+  surfaceType:'sea', surfaceTempF:52, baroclinicity:70, shearMph:22, humidityPct:80,
+  latitudeDeg:44, lonDeg:-58, steeringDirDeg:60, steeringMph:30, investStrength:45,
+  advisoryISO:'2026-01-10T18:00',
+};
 /* ================= ENGINE (Tasks 2-9) ================= */
 /* ================= MAP (Task 10) ================= */
 /* ================= UI (Tasks 11-13) ================= */
