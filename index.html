@@ -90,6 +90,23 @@ window.__eisTests.push((t) => {
   t('DP bounded 0..1', dpStrong <= 1 && dpWeak >= 0);
 });
 
+window.__eisTests.push((t, approx) => {
+  const strong = EIS.normalizeInputs({...EIS.DEFAULT_INPUTS,
+    baroclinicity:95, shearMph:20, humidityPct:90, latitudeDeg:48, investStrength:55,
+    advisoryISO:'2026-01-10T18:00'});
+  const weak = EIS.normalizeInputs({...EIS.DEFAULT_INPUTS,
+    baroclinicity:10, shearMph:5, humidityPct:30, latitudeDeg:15, investStrength:15,
+    advisoryISO:'2026-07-10T18:00'});
+  const ps = EIS.pressureProfile(strong), pw = EIS.pressureProfile(weak);
+  t('starts near ambient', approx(ps.pressureAt(0), ps.ambient, 4));
+  t('strong deepens a lot', (ps.ambient - ps.pressureAt(ps.tPeakH)) > 25);
+  t('weak deepens little', (pw.ambient - pw.pressureAt(pw.tPeakH)) < 12);
+  t('fills back toward ambient', ps.pressureAt(ps.tDeathH) > ps.pressureAt(ps.tPeakH) + 10);
+  const drop24 = ps.pressureAt(ps.tPeakH-0) - ps.pressureAt(Math.max(0,ps.tPeakH-24));
+  t('strong bombs out (>=24mb/24h somewhere)', Math.abs(drop24) >= 20);
+  t('death after peak', ps.tDeathH > ps.tPeakH);
+});
+
 /* ================= CONSTANTS (Task 1) ================= */
 EIS.PRECIP_META = {
   lightrain:    {label:'Light rain',    emoji:'\u{1F327}️', color:'var(--rain)',    water:'liquid'},
@@ -167,6 +184,33 @@ EIS.developmentPotential = function(n){
   const shearF = EIS.shearFactor(n.shearMph);
   const base = 0.50*n.b + 0.15*n.h + 0.20*latF + 0.15*seaF; // 0..1
   return EIS.clamp(base * (0.4 + 0.6*shearF), 0, 1);
+};
+
+// Deterministic deepen/fill pressure life cycle: sin^1.3 ramp to a minimum
+// central pressure at tPeakH, then exponential fill; death = first 6-hourly
+// mark after peak where the deficit drops below 3 mb (cap 240 h).
+EIS.pressureProfile = function(n){
+  const dp = EIS.developmentPotential(n);
+  const seaF = EIS.seasonFactor(n.month, n.lat);
+  const ambient = 1013;
+  const depthMb = 5 + dp*45 + seaF*10;            // 5..60 mb
+  const tPeakH = 30 + (1-dp)*36 + (1-n.s0)*18;     // ~30..84 h, strong+organized peak sooner
+  const fillK = 0.9;                                // fill slower than deepen
+  function shape(tH){
+    const x = tH / tPeakH;
+    if (x <= 0) return 0;
+    if (x <= 1) return Math.pow(Math.sin(x*Math.PI/2), 1.3); // 0 -> 1
+    return Math.exp(-fillK*(x-1));                            // 1 -> 0 (fills)
+  }
+  function deficitAt(tH){ return depthMb * shape(tH); }
+  function pressureAt(tH){ return ambient - deficitAt(tH); }
+  // Death: first 6-hourly time after peak where deficit < 3 mb (cap 240 h).
+  let tDeathH = tPeakH;
+  for (let th = Math.ceil(tPeakH/6)*6; th <= 240; th += 6){
+    if (deficitAt(th) < 3){ tDeathH = th; break; }
+    tDeathH = th;
+  }
+  return { ambient, depthMb, tPeakH, tDeathH, deficitAt, pressureAt, dp };
 };
 /* ================= MAP (Task 10) ================= */
 /* ================= UI (Tasks 11-13) ================= */
