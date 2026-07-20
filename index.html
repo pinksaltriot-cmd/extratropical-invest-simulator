@@ -321,6 +321,58 @@ EIS.phaseNote = function(trend24, deficitMb, depthMb, dying){
   if (trend24 > 3) return 'occluding';
   return deficitMb > 0.6*depthMb ? 'at peak' : 'organizing';
 };
+EIS.simulate = function(raw){
+  const n = EIS.normalizeInputs(raw);
+  const dp = EIS.developmentPotential(n);
+  const prof = EIS.pressureProfile(n);
+  const steps = [];
+  let lat = n.lat, lon = n.lon;
+  const totals = { snowIn:0, liquidIn:0 };
+  let peakIndex = 0, minP = Infinity;
+
+  for (let i=0, tH=0; tH <= prof.tDeathH; i++, tH += 6){
+    const deficit = prof.deficitAt(tH);
+    const pressureMb = Math.round(prof.pressureAt(tH));
+    const ageFrac = tH / prof.tDeathH;
+    const deficitFrac = deficit / prof.depthMb;
+
+    if (i > 0){
+      const mv = EIS.advanceTrack(lat, lon, n.dir, n.spd, 6, dp);
+      lat = mv.lat; lon = mv.lon; var heading = mv.headingDeg, speed = mv.speedMph;
+    } else { heading = n.dir; speed = n.spd; }
+
+    const wind = EIS.windFromDeficit(deficit);
+    const size = EIS.sizeAt(deficit, ageFrac);
+    const core = EIS.coreTemp(n, ageFrac, dp);
+    const regions = EIS.precipByRegion(n, dp * EIS.clamp(deficitFrac+0.15,0,1));
+    regions.forEach(rg => {
+      if (rg.water === 'snow') totals.snowIn += rg.accumIn;
+      else if (rg.water === 'liquid') totals.liquidIn += rg.accumIn;
+    });
+    const prev24 = steps.length >= 4 ? steps[steps.length-4].pressureMb : pressureMb;
+    const trend24 = pressureMb - prev24;
+    const dying = tH >= prof.tPeakH && deficit < 3;
+
+    const step = {
+      index:i, tHours:tH,
+      date: new Date(n.date.getTime() + tH*3600*1000).toISOString(),
+      formationPct: EIS.formationOdds(n, dp, deficitFrac),
+      pressureMb, pressureTrend24: Math.round(trend24),
+      windMph: wind.sustained, gustMph: wind.gust,
+      sizeMi: size.radiusMi, sizeCat: size.category,
+      lat: Math.round(lat*10)/10, lon: Math.round(lon*10)/10,
+      headingDeg: heading, speedMph: speed,
+      coreTempF: core.tempF, coreTag: core.tag,
+      phaseNote: EIS.phaseNote(trend24, deficit, prof.depthMb, dying),
+      regions,
+      stormTotals: { snowIn: Math.round(totals.snowIn*10)/10,
+                     liquidIn: Math.round(totals.liquidIn*10)/10 },
+    };
+    steps.push(step);
+    if (pressureMb < minP){ minP = pressureMb; peakIndex = i; }
+  }
+  return { ambient: prof.ambient, peakIndex, steps };
+};
 /* ================= MAP (Task 10) ================= */
 /* ================= UI (Tasks 11-13) ================= */
 
@@ -372,6 +424,31 @@ window.__eisTests.push((t) => {
   t('bombing note at big drop', EIS.phaseNote(-26, 40, 45, false) === 'bombing out');
   t('dissipating when dying', EIS.phaseNote(5, 2, 45, true) === 'dissipating');
   t('deepening note', EIS.phaseNote(-8, 20, 45, false) === 'deepening');
+});
+
+window.__eisTests.push((t) => {
+  const winter = {...EIS.DEFAULT_INPUTS, baroclinicity:95, shearMph:20, humidityPct:90,
+    latitudeDeg:48, investStrength:55, surfaceTempF:34, advisoryISO:'2026-01-10T18:00'};
+  const r = EIS.simulate(winter);
+  t('produces multiple 6-h steps', r.steps.length >= 5);
+  t('step spacing 6 h', r.steps[1].tHours - r.steps[0].tHours === 6);
+  const pressures = r.steps.map(s => s.pressureMb);
+  const minP = Math.min(...pressures);
+  t('deepens then fills', pressures[0] > minP && pressures[pressures.length-1] > minP + 8);
+  t('peakIndex marks min pressure', r.steps[r.peakIndex].pressureMb === minP);
+  t('winter has snow somewhere', r.steps.some(s =>
+      s.regions.some(rg => EIS.PRECIP_META[rg.type].water === 'snow')));
+  t('storm totals accumulate', r.steps[r.steps.length-1].stormTotals.snowIn >= 0);
+
+  // Determinism: identical inputs -> identical serialized result.
+  const a = JSON.stringify(EIS.simulate(winter));
+  const b = JSON.stringify(EIS.simulate(winter));
+  t('deterministic', a === b);
+
+  const summer = EIS.simulate({...EIS.DEFAULT_INPUTS, baroclinicity:12, shearMph:6,
+    humidityPct:35, latitudeDeg:18, investStrength:15, surfaceTempF:72,
+    advisoryISO:'2026-07-10T18:00'});
+  t('weak summer barely develops', (1013 - Math.min(...summer.steps.map(s=>s.pressureMb))) < 14);
 });
 
 /* ================= SELF-TEST HARNESS ================= */
