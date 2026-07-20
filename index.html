@@ -26,6 +26,10 @@
   .selftest{max-width:720px;margin:0 auto;padding:20px;font-family:ui-monospace,Menlo,monospace}
   .selftest .pass{color:#4ade80}.selftest .fail{color:#f87171}
   .selftest .sum{font-size:18px;font-weight:700;margin-bottom:12px}
+  aside label{display:block;margin:8px 0;color:var(--ink2);font-size:12px}
+  aside input,aside select{width:100%;margin-top:3px;background:var(--panel2);border:1px solid var(--edge);color:var(--ink);border-radius:5px;padding:6px}
+  aside input[type=range]{padding:0}
+  aside output{color:var(--accent);font-weight:700}
 </style>
 </head>
 <body>
@@ -425,6 +429,47 @@ EIS.intensityColor = function(f){
   return 'rgb('+m(0)+','+m(1)+','+m(2)+')';
 };
 /* ================= UI (Tasks 11-13) ================= */
+
+EIS.buildForm = function(aside){
+  aside.innerHTML = `
+    <h2 class="sec">Environment</h2>
+    <label>Surface <select id="f_surfaceType"><option value="sea">Sea</option><option value="land">Land</option></select></label>
+    <label><span id="f_tempLabel">Sea-surface temp (°F)</span>
+      <input id="f_surfaceTempF" type="number" value="52"></label>
+    <label>Baroclinicity <output id="f_baroOut">70</output>
+      <input id="f_baroclinicity" type="range" min="0" max="100" value="70"></label>
+    <label>Wind shear (mph) <input id="f_shearMph" type="number" value="22"></label>
+    <label>Ambient humidity (%) <input id="f_humidityPct" type="number" value="80"></label>
+    <h2 class="sec">Position &amp; motion</h2>
+    <label>Latitude (°) <input id="f_latitudeDeg" type="number" value="44"></label>
+    <label>Longitude (°) <input id="f_lonDeg" type="number" value="-58"></label>
+    <label>Steering dir (° from N) <input id="f_steeringDirDeg" type="number" value="60"></label>
+    <label>Steering speed (mph) <input id="f_steeringMph" type="number" value="30"></label>
+    <h2 class="sec">Invest</h2>
+    <label>Strength <output id="f_strOut">45</output> (0–100)
+      <input id="f_investStrength" type="range" min="0" max="100" value="45"></label>
+    <label>Advisory time <input id="f_advisoryISO" type="datetime-local" value="2026-01-10T18:00"></label>
+    <button id="f_run" style="margin-top:14px;width:100%;padding:10px;background:#1e6091;color:#dff;border:none;border-radius:6px;font-weight:700;cursor:pointer">▶ Simulate lifecycle</button>
+  `;
+  // live-updating range outputs + sea/land temp label
+  const bind = (id,out)=>{ const i=aside.querySelector('#'+id), o=aside.querySelector('#'+out);
+    i.addEventListener('input',()=>o.textContent=i.value); };
+  bind('f_baroclinicity','f_baroOut'); bind('f_investStrength','f_strOut');
+  aside.querySelector('#f_surfaceType').addEventListener('change',e=>{
+    aside.querySelector('#f_tempLabel').textContent =
+      (e.target.value==='sea'?'Sea-surface':'Land')+' temp (°F)';
+  });
+};
+EIS.readForm = function(aside){
+  const v = id => aside.querySelector('#'+id).value;
+  return {
+    surfaceType:v('f_surfaceType'), surfaceTempF:v('f_surfaceTempF'),
+    baroclinicity:v('f_baroclinicity'), shearMph:v('f_shearMph'),
+    humidityPct:v('f_humidityPct'), latitudeDeg:v('f_latitudeDeg'), lonDeg:v('f_lonDeg'),
+    steeringDirDeg:v('f_steeringDirDeg'), steeringMph:v('f_steeringMph'),
+    investStrength:v('f_investStrength'), advisoryISO:v('f_advisoryISO'),
+  };
+};
 
 window.__eisTests.push((t, approx) => {
   const W=800, H=400;
