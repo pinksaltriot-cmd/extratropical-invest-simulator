@@ -1008,6 +1008,86 @@ window.__eisTests.push((t) => {
     lcount('SSRC') === 4 && lcount('CSRC') === 8 && lcount('NSRC') === 3);
 });
 
+// The seven SRC records. Full derivations in docs/glossary.md.
+// `bearing` is carried per-record, NOT defaulted from subtype: both latitude
+// extremes reach their extremes through bearing rather than date.
+EIS.SRC_RECORDS = [
+  { key:'east',   label:'Farthest east',      city:'St. Louis, MO',
+    dateISO:'2022-05-13T02:00', subtype:'CSRC', bearing:96,    distanceMi:795,
+    lat:38.63, lon:-90.20 },
+  { key:'earlyF', label:'Earliest in fall',   city:'Aberdeen, SD',
+    dateISO:'2018-09-17T02:00', subtype:'NSRC', bearing:46.9,  distanceMi:436,
+    lat:45.46, lon:-98.49 },
+  { key:'lateF',  label:'Latest in fall',     city:'Texarkana, TX/AR',
+    dateISO:'2014-11-15T02:00', subtype:'SSRC', bearing:119.4, distanceMi:678,
+    lat:33.43, lon:-94.05 },
+  { key:'earlyS', label:'Earliest in spring', city:'Fort Worth, TX',
+    dateISO:'2020-03-23T02:00', subtype:'SSRC', bearing:132.9, distanceMi:558,
+    lat:32.75, lon:-97.33 },
+  { key:'lateS',  label:'Latest in spring',   city:'Pierre, SD',
+    dateISO:'2016-06-03T02:00', subtype:'NSRC', bearing:45.4,  distanceMi:317,
+    lat:44.37, lon:-100.35 },
+  { key:'south',  label:'Southernmost',       city:'San Angelo, TX',
+    dateISO:'2012-03-30T02:00', subtype:'SSRC', bearing:153.2, distanceMi:524,
+    lat:31.46, lon:-100.44 },
+  { key:'north',  label:'Northernmost',       city:'Minot, ND',
+    dateISO:'2024-09-21T02:00', subtype:'NSRC', bearing:19.5,  distanceMi:519,
+    lat:48.23, lon:-101.30 },
+];
+
+// Turn a record into a full input set. Lifetime follows from distance and speed.
+// NOTE: rec.lat/rec.lon are the DESTINATION city; the run STARTS at the subtype's
+// genesis point on the Front Range. That asymmetry is deliberate.
+EIS.srcInputsForRecord = function(rec, speedMph){
+  const spd = speedMph || 35;
+  const st = EIS.SRC_SUBTYPES[rec.subtype];
+  return {
+    ...EIS.SRC_DEFAULT_INPUTS,
+    latitudeDeg: st.lat, lonDeg: st.lon,
+    steeringDirDeg: rec.bearing, steeringMph: spd,
+    advisoryISO: rec.dateISO,
+    srcSubtype: rec.subtype,
+    srcLifetimeH: Math.round(rec.distanceMi / spd),
+  };
+};
+
+window.__eisTests.push((t, approx) => {
+  const R = EIS.SRC_RECORDS;
+  t('seven records', R.length === 7);
+
+  // Each record's stored subtype must match what the migration rule computes.
+  R.forEach(r => {
+    t(r.city + ' subtype matches migration rule',
+      EIS.srcSubtypeFor(new Date(r.dateISO)) === r.subtype);
+  });
+
+  // Every bearing must fall inside its subtype's band. Minot (19.5) and
+  // Texarkana (119.4) sit ON the edges — narrowing a band strands a real record.
+  R.forEach(r => {
+    const st = EIS.SRC_SUBTYPES[r.subtype];
+    t(r.city + ' bearing inside band',
+      r.bearing >= st.bandMin && r.bearing <= st.bandMax);
+  });
+
+  // Bearing is preset-supplied, not subtype-defaulted. San Angelo is a week LATER
+  // than Fort Worth yet reaches further south, purely via bearing.
+  const sa = R.find(r => r.city.indexOf('San Angelo') === 0);
+  const fw = R.find(r => r.city.indexOf('Fort Worth') === 0);
+  t('San Angelo reaches further south', sa.lat < fw.lat);
+  t('San Angelo runs a steeper bearing', sa.bearing > fw.bearing);
+
+  t('latitude extremes', Math.min(...R.map(r=>r.lat)) < 31.5 + 0.01 &&
+                         Math.max(...R.map(r=>r.lat)) > 48.2 - 0.01);
+  t('St. Louis is farthest east', Math.max(...R.map(r=>r.distanceMi)) === 795);
+
+  // Six of seven fall outside the core windows — the validator must warn, not reject.
+  const inCore = R.filter(r => {
+    const w = EIS.srcSeasonWarmth(new Date(r.dateISO));
+    return w >= 0 && w <= 1;
+  });
+  t('only St. Louis is in-window', inCore.length === 1 && inCore[0].city.indexOf('St. Louis') === 0);
+});
+
 // Rainfall duration at a FIXED POINT (Eulerian), distinct from system lifetime
 // (Lagrangian). A point offset `offsetMi` from the track axis cuts a chord
 // 2*sqrt(r^2 - d^2) through the shield; the centerline chord is the full diameter.
