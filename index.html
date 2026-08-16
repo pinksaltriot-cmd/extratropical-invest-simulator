@@ -521,7 +521,7 @@ EIS.buildForm = function(aside){
         <option value="CSRC" selected>CSRC — Central (Denver, E)</option>
         <option value="SSRC">SSRC — South (Pueblo, SE)</option>
       </select></label>
-      <label>Lifetime (h) <input id="f_srcLifetimeH" type="number" min="10" max="26" value="12"></label>
+      <label>Lifetime (h) <input id="f_srcLifetimeH" type="number" min="9" max="26" value="12"></label>
       <label>Notable event <select id="f_srcRecord">
         <option value="">— none —</option>
       </select></label>
@@ -581,6 +581,7 @@ EIS.buildForm = function(aside){
     aside.querySelector('#f_steeringDirDeg').value = inp.steeringDirDeg;
     aside.querySelector('#f_advisoryISO').value = inp.advisoryISO;
     EIS.updateSrcWarning(aside);
+    aside.querySelector('#f_run').click();   // presets re-run, like calendar ticks
   });
 
   aside.querySelector('#f_srcSubtype').addEventListener('change', () => {
@@ -588,6 +589,9 @@ EIS.buildForm = function(aside){
     aside.querySelector('#f_latitudeDeg').value = st.lat;
     aside.querySelector('#f_lonDeg').value = st.lon;
     aside.querySelector('#f_steeringDirDeg').value = st.defaultBearing;
+    // The bearing just moved off the record's own value, so the record label
+    // would be claiming a run this form no longer represents.
+    recSel.value = '';
     EIS.updateSrcWarning(aside);
   });
 
@@ -595,8 +599,12 @@ EIS.buildForm = function(aside){
     () => EIS.updateSrcWarning(aside));
 };
 
+// Seats a complete, self-consistent SRC starting state. Position, bearing and
+// date are included deliberately: without them the mode switch inherits the
+// invest track and greets the user with two warnings on arrival.
 EIS.applySrcDefaults = function(root){
   const d = EIS.SRC_DEFAULT_INPUTS;
+  const st = EIS.SRC_SUBTYPES[d.srcSubtype];
   root.querySelector('#f_surfaceType').value = d.surfaceType;
   root.querySelector('#f_surfaceTempF').value = d.surfaceTempF;
   root.querySelector('#f_baroclinicity').value = d.baroclinicity;
@@ -604,6 +612,19 @@ EIS.applySrcDefaults = function(root){
   root.querySelector('#f_humidityPct').value = d.humidityPct;
   root.querySelector('#f_investStrength').value = d.investStrength;
   root.querySelector('#f_steeringMph').value = d.steeringMph;
+  root.querySelector('#f_srcSubtype').value = d.srcSubtype;
+  root.querySelector('#f_srcLifetimeH').value = d.srcLifetimeH;
+  root.querySelector('#f_srcRecord').value = '';
+  root.querySelector('#f_latitudeDeg').value = st.lat;
+  root.querySelector('#f_lonDeg').value = st.lon;
+  root.querySelector('#f_steeringDirDeg').value = st.defaultBearing;
+  root.querySelector('#f_advisoryISO').value = d.advisoryISO;
+  // Assigning .value fires nothing, so the range readouts and the sea/land temp
+  // label would keep showing the invest numbers. Replay the events the form
+  // already listens for rather than restating their handlers here.
+  root.querySelector('#f_baroclinicity').dispatchEvent(new Event('input'));
+  root.querySelector('#f_investStrength').dispatchEvent(new Event('input'));
+  root.querySelector('#f_surfaceType').dispatchEvent(new Event('change'));
   EIS.updateSrcWarning(root);
 };
 
@@ -655,6 +676,81 @@ EIS.__mkForm = function(){
   EIS.buildForm(d);
   return d;
 };
+
+// Entering SRC mode must land on a coherent, warning-free state, and every
+// control the defaults touch must AGREE with what is displayed beside it.
+window.__eisTests.push((t) => {
+  const enter = () => {
+    const root = EIS.__mkForm();
+    const m = root.querySelector('#f_mode');
+    m.value = 'src';
+    m.dispatchEvent(new Event('change'));
+    return root;
+  };
+
+  const root = enter();
+  const v = id => root.querySelector('#'+id).value;
+  const csrc = EIS.SRC_SUBTYPES.CSRC;
+
+  t('entering SRC mode raises no warning at all',
+    root.querySelector('#src_warn').textContent === '');
+  t('entering SRC mode seats the CSRC genesis latitude', v('f_latitudeDeg') === String(csrc.lat));
+  t('entering SRC mode seats the CSRC genesis longitude', v('f_lonDeg') === String(csrc.lon));
+  t('entering SRC mode seats the CSRC default bearing',
+    v('f_steeringDirDeg') === String(csrc.defaultBearing));
+  t('entering SRC mode seats an in-season date',
+    v('f_advisoryISO') === EIS.SRC_DEFAULT_INPUTS.advisoryISO);
+  t('the seated date really is inside a core window', (() => {
+    const w = EIS.srcSeasonWarmth(EIS.srcParseDate(v('f_advisoryISO')));
+    return w !== null && w >= 0 && w <= 1;
+  })());
+  t('the seated date classifies as CSRC',
+    EIS.srcSubtypeFor(EIS.srcParseDate(v('f_advisoryISO'))) === 'CSRC');
+
+  // Display elements that sit next to a value must not contradict it.
+  t('baroclinicity readout matches its slider',
+    root.querySelector('#f_baroOut').textContent === v('f_baroclinicity'));
+  t('invest-strength readout matches its slider',
+    root.querySelector('#f_strOut').textContent === v('f_investStrength'));
+  t('temp label follows the land surface default',
+    root.querySelector('#f_tempLabel').textContent.indexOf('Land') === 0);
+
+  // Pierre is 317 mi at 35 mph -> 9 h. The input must not call its own preset invalid.
+  const life = root.querySelector('#f_srcLifetimeH');
+  t('lifetime lower bound admits the shortest record', +life.min === 9);
+  life.value = 9;
+  t('a 9 h lifetime is valid', life.checkValidity());
+  t('every record lifetime is inside the input bounds',
+    EIS.SRC_RECORDS.every(rec => {
+      const h = EIS.srcInputsForRecord(rec).srcLifetimeH;
+      return h >= +life.min && h <= +life.max;
+    }));
+
+  // Changing the subtype rewrites the bearing, so the record label would go stale.
+  const sub = enter();
+  const recSel = sub.querySelector('#f_srcRecord');
+  recSel.value = 'north';
+  recSel.dispatchEvent(new Event('change'));
+  t('record selection sticks before the subtype is touched', recSel.value === 'north');
+  const subSel = sub.querySelector('#f_srcSubtype');
+  subSel.value = 'SSRC';
+  subSel.dispatchEvent(new Event('change'));
+  t('changing the subtype clears the stale record label', recSel.value === '');
+  t('changing the subtype does rewrite the bearing',
+    sub.querySelector('#f_steeringDirDeg').value === String(EIS.SRC_SUBTYPES.SSRC.defaultBearing));
+
+  // Picking a record must re-run, the way a calendar tick will.
+  const fire = enter();
+  let runs = 0;
+  fire.querySelector('#f_run').addEventListener('click', () => runs++);
+  const fireSel = fire.querySelector('#f_srcRecord');
+  fireSel.value = 'east';
+  fireSel.dispatchEvent(new Event('change'));
+  t('picking a record re-runs the simulation', runs === 1);
+  fireSel.value = '';
+  fireSel.dispatchEvent(new Event('change'));
+  t('clearing the record selector does not re-run', runs === 1);
+});
 
 window.__eisTests.push((t) => {
   const root = EIS.__mkForm();
