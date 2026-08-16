@@ -680,6 +680,50 @@ window.__eisTests.push((t) => {
     EIS.simulate({...EIS.DEFAULT_INPUTS}).steps[1].tHours === 6);
 });
 
+window.__eisTests.push((t, approx) => {
+  t('SRC deficit rounds to 1010 mb',
+    Math.round(EIS.SRC.AMBIENT - EIS.SRC.DEFICIT_MB) === 1010);
+  t('SRC shield radius in 40-45 mi', EIS.SRC.RADIUS_MI >= 40 && EIS.SRC.RADIUS_MI <= 45);
+  t('SRC wind is 15 mph', EIS.SRC.WIND_MPH === 15);
+  t('SRC regions exclude comma head and cold front',
+    EIS.SRC.REGIONS.length === 2 &&
+    EIS.SRC.REGIONS.indexOf('Comma head') === -1 &&
+    EIS.SRC.REGIONS.indexOf('Cold front') === -1);
+  t('three subtypes defined', Object.keys(EIS.SRC_SUBTYPES).length === 3);
+  t('bands are contiguous',
+    EIS.SRC_SUBTYPES.NSRC.bandMax === EIS.SRC_SUBTYPES.CSRC.bandMin &&
+    EIS.SRC_SUBTYPES.CSRC.bandMax === EIS.SRC_SUBTYPES.SSRC.bandMin);
+  t('Minot bearing 19.5 inside NSRC band', 19.5 >= EIS.SRC_SUBTYPES.NSRC.bandMin);
+  t('Texarkana bearing 119.4 inside SSRC band', 119.4 >= EIS.SRC_SUBTYPES.SSRC.bandMin);
+});
+
+/* ================= SRC MODE ================= */
+// Steady Rain Cycle. Definitions: docs/glossary.md
+EIS.SRC = {
+  AMBIENT: 1013,
+  DEFICIT_MB: 3.25,        // 1013 - 3.25 = 1009.75 -> rounds to 1010 mb
+  RADIUS_MI: 42.5,         // shield radius, NOT gale radius (no gale winds at 15 mph)
+  SPEED_MIN: 30, SPEED_MAX: 40,
+  WIND_MPH: 15,
+  GUST_FACTOR: 1.35,       // matches windFromDeficit's factor
+  STEP_H: 1,
+  TEMP_F: 50,
+  HUMIDITY_PCT: 75,
+  REGIONS: ['Warm front', 'Warm sector'],   // no comma head: never occludes
+};
+
+// Genesis points along the Front Range, all within 0.4 deg of longitude.
+// Band edges are EMPIRICAL — set by the extreme records (Minot 19.5, Texarkana 119.4).
+// Narrowing them makes those records unreachable.
+EIS.SRC_SUBTYPES = {
+  NSRC: { name:'North SRC',   genesis:'Cheyenne, WY', lat:41.14, lon:-104.82,
+          bandMin:19,  bandMax:70,  defaultBearing:45 },
+  CSRC: { name:'Central SRC', genesis:'Denver, CO',   lat:39.74, lon:-104.99,
+          bandMin:70,  bandMax:119, defaultBearing:95 },
+  SSRC: { name:'South SRC',   genesis:'Pueblo, CO',   lat:38.25, lon:-104.61,
+          bandMin:119, bandMax:160, defaultBearing:135 },
+};
+
 EIS.init = function(){
   if (/(\?|&)selftest\b/.test(location.search)) return; // harness owns the page
   const aside = document.getElementById('inputs');
