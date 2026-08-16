@@ -1131,6 +1131,51 @@ window.__eisTests.push((t, approx) => {
   t('only St. Louis is in-window', inCore.length === 1 && inCore[0].city.indexOf('St. Louis') === 0);
 });
 
+window.__eisTests.push((t, approx) => {
+  const r = EIS.simulate(EIS.SRC_DEFAULT_INPUTS);
+  t('SRC runs at 1-hour steps', r.steps[1].tHours === 1);
+  t('SRC runs its full lifetime', r.steps.length === 13); // 0..12 h inclusive
+  t('SRC holds 1010 mb throughout', r.steps.every(s => s.pressureMb === 1010));
+
+  const wf = r.steps[5].regions.find(g => g.region === 'Warm front');
+  t('warm front present', !!wf);
+  t('warm front produces light rain', wf.type === 'lightrain');
+  t('no comma head in SRC', !r.steps[5].regions.some(g => g.region === 'Comma head'));
+  t('no cold front in SRC', !r.steps[5].regions.some(g => g.region === 'Cold front'));
+
+  // No SRC anywhere in the year may yield frozen or convective precip. This is the
+  // assertion the whole seasonal migration rule exists to satisfy.
+  const badTypes = ['sleet','ice','thunderstorm','thundersnow','hail',
+                    'lightsnow','modsnow','heavysnow','snowgrains'];
+  const season = EIS.srcSeason(2026);
+  let offenders = 0;
+  season.forEach(ev => {
+    const sim = EIS.simulate({
+      ...EIS.SRC_DEFAULT_INPUTS,
+      latitudeDeg: ev.lat, lonDeg: ev.lon,
+      steeringDirDeg: ev.bearing, advisoryISO: ev.date.toISOString().slice(0,16),
+      srcSubtype: ev.subtype,
+    });
+    sim.steps.forEach(s => s.regions.forEach(g => {
+      if (badTypes.indexOf(g.type) !== -1) offenders++;
+    }));
+  });
+  t('no SRC in the season yields sleet, snow, or thunder', offenders === 0);
+
+  // Every record loads and runs without a validation rejection.
+  let ran = 0;
+  EIS.SRC_RECORDS.forEach(rec => {
+    const sim = EIS.simulate(EIS.srcInputsForRecord(rec));
+    if (sim.steps.length > 1) ran++;
+  });
+  t('all seven records simulate', ran === 7);
+
+  // St. Louis is the long-track record: ~795 mi at 35 mph is ~23 h.
+  const stl = EIS.simulate(EIS.srcInputsForRecord(
+    EIS.SRC_RECORDS.find(x => x.key === 'east')));
+  t('St. Louis runs about 23 hours', stl.steps.length >= 22 && stl.steps.length <= 24);
+});
+
 // Rainfall duration at a FIXED POINT (Eulerian), distinct from system lifetime
 // (Lagrangian). A point offset `offsetMi` from the track axis cuts a chord
 // 2*sqrt(r^2 - d^2) through the shield; the centerline chord is the full diameter.
