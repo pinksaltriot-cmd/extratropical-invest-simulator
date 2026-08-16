@@ -1505,11 +1505,15 @@ EIS.srcBudget = function(year){
   const centerlineIn = season.length * EIS.SRC_EVENT_ACCUM_IN;
   const A = EIS.SRC_ANNUAL_PRECIP_IN;
   const pct = (inches, denom) => Math.round(inches/denom*1000)/10;
-  // Realistic: one corridor only, roughly half of it intercepted. There is no
-  // further off-axis discount — SRC_EVENT_ACCUM_IN is ALREADY the ~0.2 in a real
-  // interception yields, so discounting again would double-count the geometry
-  // and push the share to 1.8-2.1%, below the 2-4% this model claims.
-  const realisticIn = maxCorridorEvents * EIS.SRC_EVENT_ACCUM_IN * 0.5;
+  // Realistic: one corridor only, roughly half of it intercepted, and off-axis
+  // when it is. The 0.5 and the 0.8 are DIFFERENT geometries, not the same
+  // discount twice. SRC_EVENT_ACCUM_IN is the CENTERLINE accumulation — the
+  // maximum, reserved for a town sitting directly under the track axis. Swaths
+  // run 80-90 mi wide on bearings spread across a ~49 deg band, so a town that
+  // intercepts an event almost always does so off-axis and cuts a shorter chord
+  // through the shield, collecting less than the centerline figure. The 0.5
+  // models how OFTEN it is hit; the 0.8 models how MUCH it gets when it is.
+  const realisticIn = maxCorridorEvents * EIS.SRC_EVENT_ACCUM_IN * 0.5 * 0.8;
   return {
     year, events: season.length, byType, maxCorridorEvents,
     centerlineIn, centerlineUnreachable: true,
@@ -1541,17 +1545,19 @@ window.__eisTests.push((t, approx) => {
   t('15 events', b.events === 15);
   t('centerline total is 3.0 in', approx(b.centerlineIn, 3.0, 0.01));
   t('centerline share is 8-10%', b.centerlinePctLo >= 8 && b.centerlinePctHi <= 10);
-  t('realistic share is 2-4%', b.realisticPctLo >= 2 && b.realisticPctHi <= 4);
+  t('realistic share is 1.5-2.5%', b.realisticPctLo >= 1.5 && b.realisticPctHi <= 2.5);
   t('realistic is below centerline', b.realisticPctHi < b.centerlinePctLo);
   t('centerline is flagged unreachable', b.centerlineUnreachable === true);
   t('max exposure is the CSRC count', b.maxCorridorEvents === 8);
 
-  // The realistic figure is one corridor, half intercepted. The off-axis
-  // reduction is NOT applied a second time here: SRC_EVENT_ACCUM_IN is already
-  // the ~0.2 in a real interception delivers. Stacking a further 0.8 drops the
-  // share to 1.8-2.1% and contradicts the 2-4% band asserted above.
-  t('realistic is one corridor at half interception',
-    approx(b.realisticIn, b.maxCorridorEvents * EIS.SRC_EVENT_ACCUM_IN * 0.5, 0.001));
+  // The realistic figure stacks two INDEPENDENT geometries: 0.5 is how often a
+  // corridor town is hit at all, 0.8 is how much it gets when it is hit.
+  // SRC_EVENT_ACCUM_IN is the CENTERLINE accumulation — the maximum, delivered
+  // only to a town directly under the track axis — so the off-axis cut is a
+  // separate reduction, not the same one twice.
+  t('realistic is one corridor, half intercepted, off-axis',
+    approx(b.realisticIn, b.maxCorridorEvents * EIS.SRC_EVENT_ACCUM_IN * 0.5 * 0.8, 0.001));
+  t('realistic total is 0.64 in', approx(b.realisticIn, 0.64, 0.001));
   t('realistic is well under the centerline total', b.realisticIn < b.centerlineIn);
 
   // Rendering: the reachable number must lead, because showing only the
