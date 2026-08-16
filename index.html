@@ -511,6 +511,22 @@ EIS.intensityColor = function(f){
 EIS.buildForm = function(aside){
   aside.innerHTML = `
     <h2 class="sec">Environment</h2>
+    <label>Mode <select id="f_mode">
+      <option value="invest">Extratropical invest</option>
+      <option value="src">Steady Rain Cycle</option>
+    </select></label>
+    <div id="src_panel" style="display:none;border-left:3px solid #1e6091;padding-left:10px;margin:8px 0">
+      <label>Subtype <select id="f_srcSubtype">
+        <option value="NSRC">NSRC — North (Cheyenne, NE)</option>
+        <option value="CSRC" selected>CSRC — Central (Denver, E)</option>
+        <option value="SSRC">SSRC — South (Pueblo, SE)</option>
+      </select></label>
+      <label>Lifetime (h) <input id="f_srcLifetimeH" type="number" min="10" max="26" value="12"></label>
+      <label>Notable event <select id="f_srcRecord">
+        <option value="">— none —</option>
+      </select></label>
+      <div id="src_warn" style="color:#fbbf24;font-size:12px;margin-top:6px"></div>
+    </div>
     <label>Surface <select id="f_surfaceType"><option value="sea">Sea</option><option value="land">Land</option></select></label>
     <label><span id="f_tempLabel">Sea-surface temp (°F)</span>
       <input id="f_surfaceTempF" type="number" value="52"></label>
@@ -537,7 +553,87 @@ EIS.buildForm = function(aside){
     aside.querySelector('#f_tempLabel').textContent =
       (e.target.value==='sea'?'Sea-surface':'Land')+' temp (°F)';
   });
+
+  const recSel = aside.querySelector('#f_srcRecord');
+  EIS.SRC_RECORDS.forEach(r => {
+    const o = document.createElement('option');
+    o.value = r.key;
+    o.textContent = r.label + ' — ' + r.city + ' (' + r.dateISO.slice(0,10) + ')';
+    recSel.appendChild(o);
+  });
+
+  const modeSel = aside.querySelector('#f_mode');
+  const panel = aside.querySelector('#src_panel');
+  modeSel.addEventListener('change', () => {
+    const isSrc = modeSel.value === 'src';
+    panel.style.display = isSrc ? 'block' : 'none';
+    if (isSrc) EIS.applySrcDefaults(aside);
+  });
+
+  recSel.addEventListener('change', () => {
+    const rec = EIS.SRC_RECORDS.find(r => r.key === recSel.value);
+    if (!rec) return;
+    const inp = EIS.srcInputsForRecord(rec);
+    aside.querySelector('#f_srcSubtype').value = rec.subtype;
+    aside.querySelector('#f_srcLifetimeH').value = inp.srcLifetimeH;
+    aside.querySelector('#f_latitudeDeg').value = inp.latitudeDeg;
+    aside.querySelector('#f_lonDeg').value = inp.lonDeg;
+    aside.querySelector('#f_steeringDirDeg').value = inp.steeringDirDeg;
+    aside.querySelector('#f_advisoryISO').value = inp.advisoryISO;
+    EIS.updateSrcWarning(aside);
+  });
+
+  aside.querySelector('#f_srcSubtype').addEventListener('change', () => {
+    const st = EIS.SRC_SUBTYPES[aside.querySelector('#f_srcSubtype').value];
+    aside.querySelector('#f_latitudeDeg').value = st.lat;
+    aside.querySelector('#f_lonDeg').value = st.lon;
+    aside.querySelector('#f_steeringDirDeg').value = st.defaultBearing;
+    EIS.updateSrcWarning(aside);
+  });
+
+  aside.querySelector('#f_advisoryISO').addEventListener('change',
+    () => EIS.updateSrcWarning(aside));
 };
+
+EIS.applySrcDefaults = function(root){
+  const d = EIS.SRC_DEFAULT_INPUTS;
+  root.querySelector('#f_surfaceType').value = d.surfaceType;
+  root.querySelector('#f_surfaceTempF').value = d.surfaceTempF;
+  root.querySelector('#f_baroclinicity').value = d.baroclinicity;
+  root.querySelector('#f_shearMph').value = d.shearMph;
+  root.querySelector('#f_humidityPct').value = d.humidityPct;
+  root.querySelector('#f_investStrength').value = d.investStrength;
+  root.querySelector('#f_steeringMph').value = d.steeringMph;
+  EIS.updateSrcWarning(root);
+};
+
+// WARN, never reject. Six of the seven records fall outside the core windows;
+// a rejecting validator could not load its own preset list.
+EIS.updateSrcWarning = function(root){
+  const el = root.querySelector('#src_warn');
+  if (!el) return;
+  const msgs = [];
+  const date = EIS.srcParseDate(root.querySelector('#f_advisoryISO').value);
+  const w = EIS.srcSeasonWarmth(date);
+  if (w === null){
+    msgs.push('⚠ Outside both SRC seasons — SRCs form only in transition seasons.');
+  } else if (w < 0 || w > 1){
+    msgs.push('⚠ Exceptional: outside the core window (Sep 25–Nov 4 / Apr 3–May 27).');
+  }
+  const spd = +root.querySelector('#f_steeringMph').value;
+  if (spd < EIS.SRC.SPEED_MIN || spd > EIS.SRC.SPEED_MAX){
+    msgs.push('⚠ Speed outside 30–40 mph breaks the 2–3 h point-duration window.');
+  }
+  const sub = root.querySelector('#f_srcSubtype').value;
+  const st = EIS.SRC_SUBTYPES[sub];
+  const brg = +root.querySelector('#f_steeringDirDeg').value;
+  if (brg < st.bandMin || brg > st.bandMax){
+    msgs.push('⚠ Bearing ' + brg + '° is outside the ' + sub +
+              ' band (' + st.bandMin + '–' + st.bandMax + '°).');
+  }
+  el.innerHTML = msgs.join('<br>');
+};
+
 EIS.readForm = function(aside){
   const v = id => aside.querySelector('#'+id).value;
   return {
@@ -546,8 +642,139 @@ EIS.readForm = function(aside){
     humidityPct:v('f_humidityPct'), latitudeDeg:v('f_latitudeDeg'), lonDeg:v('f_lonDeg'),
     steeringDirDeg:v('f_steeringDirDeg'), steeringMph:v('f_steeringMph'),
     investStrength:v('f_investStrength'), advisoryISO:v('f_advisoryISO'),
+    srcMode: aside.querySelector('#f_mode').value === 'src',
+    srcSubtype: aside.querySelector('#f_srcSubtype').value,
+    srcLifetimeH: +aside.querySelector('#f_srcLifetimeH').value,
   };
 };
+
+// ---- DOM tests. The form is built into a DETACHED div so nothing here can
+// touch the live page; event handlers fire on detached nodes just the same.
+EIS.__mkForm = function(){
+  const d = document.createElement('div');
+  EIS.buildForm(d);
+  return d;
+};
+
+window.__eisTests.push((t) => {
+  const root = EIS.__mkForm();
+
+  const mode = root.querySelector('#f_mode');
+  t('form has a mode select', !!mode);
+  t('mode select has exactly two options', !!mode && mode.options.length === 2);
+  t('mode options are invest and src', !!mode &&
+    mode.options[0].value === 'invest' && mode.options[1].value === 'src');
+  t('invest is the default mode', !!mode && mode.value === 'invest');
+
+  const recSel = root.querySelector('#f_srcRecord');
+  t('record dropdown holds the seven records plus a none sentinel',
+    !!recSel && recSel.options.length === EIS.SRC_RECORDS.length + 1);
+  t('record dropdown has 8 options', !!recSel && recSel.options.length === 8);
+  t('first record option is the empty sentinel',
+    !!recSel && recSel.options[0].value === '');
+  t('every record key is reachable from the dropdown', !!recSel &&
+    EIS.SRC_RECORDS.every(r =>
+      Array.prototype.some.call(recSel.options, o => o.value === r.key)));
+
+  t('SRC panel starts hidden',
+    root.querySelector('#src_panel').style.display === 'none');
+
+  t('readForm reports invest mode by default', EIS.readForm(root).srcMode === false);
+  root.querySelector('#f_mode').value = 'src';
+  const rf = EIS.readForm(root);
+  t('readForm reports SRC mode once selected', rf.srcMode === true);
+  t('readForm carries the subtype', rf.srcSubtype === 'CSRC');
+  t('readForm carries the lifetime', rf.srcLifetimeH === 12);
+
+  // The SRC fields exist but are hidden on the invest path. normalizeInputs must
+  // shrug them off: the default invest run has to stay a 6-hour-step life cycle.
+  const inv = EIS.readForm(EIS.__mkForm());
+  t('untouched form still reads as invest mode', inv.srcMode === false);
+  t('untouched form still runs the invest life cycle',
+    EIS.simulate(inv).steps[1].tHours === 6);
+
+  const dRoot = EIS.__mkForm();
+  EIS.applySrcDefaults(dRoot);
+  const d = EIS.SRC_DEFAULT_INPUTS;
+  const eq = (id, val) => dRoot.querySelector('#'+id).value === String(val);
+  t('applySrcDefaults sets surface type', eq('f_surfaceType', d.surfaceType));
+  t('applySrcDefaults sets surface temp', eq('f_surfaceTempF', d.surfaceTempF));
+  t('applySrcDefaults sets baroclinicity', eq('f_baroclinicity', d.baroclinicity));
+  t('applySrcDefaults sets shear', eq('f_shearMph', d.shearMph));
+  t('applySrcDefaults sets humidity', eq('f_humidityPct', d.humidityPct));
+  t('applySrcDefaults sets invest strength', eq('f_investStrength', d.investStrength));
+  t('applySrcDefaults sets steering speed', eq('f_steeringMph', d.steeringMph));
+});
+
+// The validator WARNS; it must never reject. Six of the seven presets sit outside
+// the core season windows, so a rejecting validator could not load its own list.
+window.__eisTests.push((t) => {
+  const load = (key) => {
+    const root = EIS.__mkForm();
+    const m = root.querySelector('#f_mode');
+    m.value = 'src';
+    m.dispatchEvent(new Event('change'));
+    const sel = root.querySelector('#f_srcRecord');
+    sel.value = key;
+    sel.dispatchEvent(new Event('change'));
+    return root;
+  };
+  const warnOf = (root) => root.querySelector('#src_warn').textContent;
+
+  t('selecting SRC mode reveals the panel',
+    load('east').querySelector('#src_panel').style.display === 'block');
+
+  EIS.SRC_RECORDS.forEach(rec => {
+    let root = null;
+    try { root = load(rec.key); } catch(e){ /* leaves root null */ }
+    t(rec.city + ' preset loads and validates without throwing', root !== null);
+    if (!root) return;
+    t(rec.city + ' preset is still runnable after the warning',
+      EIS.simulate(EIS.readForm(root)).steps.length > 1);
+    t(rec.city + ' preset lands on its own subtype',
+      root.querySelector('#f_srcSubtype').value === rec.subtype);
+    const w = warnOf(root);
+    if (rec.key === 'east'){
+      t('St. Louis raises no seasonal warning',
+        w.indexOf('Exceptional') === -1 && w.indexOf('Outside both') === -1);
+      t('St. Louis raises no warning at all', w === '');
+    } else {
+      t(rec.city + ' warns that it is exceptional',
+        w.length > 0 && w.indexOf('Exceptional') !== -1);
+    }
+  });
+
+  const spd = load('east');
+  spd.querySelector('#f_steeringMph').value = 50;
+  EIS.updateSrcWarning(spd);
+  t('speed 50 raises the speed warning',
+    warnOf(spd).indexOf('Speed outside') !== -1);
+  spd.querySelector('#f_steeringMph').value = 35;
+  EIS.updateSrcWarning(spd);
+  t('speed 35 raises no speed warning',
+    warnOf(spd).indexOf('Speed outside') === -1);
+
+  // CSRC band is 70-119; 200 is well outside it.
+  const brg = load('east');
+  brg.querySelector('#f_steeringDirDeg').value = 200;
+  EIS.updateSrcWarning(brg);
+  t('out-of-band bearing raises the band warning',
+    warnOf(brg).indexOf('outside the CSRC band') !== -1);
+  t('out-of-band bearing still simulates',
+    EIS.simulate(EIS.readForm(brg)).steps.length > 1);
+  brg.querySelector('#f_steeringDirDeg').value = 96;
+  EIS.updateSrcWarning(brg);
+  t('in-band bearing raises no band warning',
+    warnOf(brg).indexOf('band') === -1);
+
+  const off = load('east');
+  off.querySelector('#f_advisoryISO').value = '2026-07-15T02:00';
+  EIS.updateSrcWarning(off);
+  t('midsummer warns that there is no SRC season',
+    warnOf(off).indexOf('Outside both') !== -1);
+  t('midsummer date is warned about, not blocked',
+    EIS.simulate(EIS.readForm(off)).steps.length > 1);
+});
 
 EIS.fmtDate = function(iso){
   const d = new Date(iso);
