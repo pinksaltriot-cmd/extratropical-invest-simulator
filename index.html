@@ -885,7 +885,18 @@ EIS.SRC_SHOULDER_DAYS = 14;
 
 EIS.__srcDay = function(year, md){ return Date.UTC(year, md[0]-1, md[1]) / 86400000; };
 
+// Dates are interpreted as UTC regardless of the viewer's timezone. The engine's
+// contract is determinism — the same inputs must always yield the same life cycle —
+// and a bare 'YYYY-MM-DDTHH:mm' parses as LOCAL time, which would shift a record's
+// day (and possibly its subtype) for users east of UTC+2. Form inputs are bare by
+// necessity (datetime-local rejects a designator), so normalize here.
+EIS.srcParseDate = function(iso){
+  if (iso instanceof Date) return iso;
+  return new Date(/([Zz]|[+-]\d\d:?\d\d)$/.test(iso) ? iso : iso + 'Z');
+};
+
 EIS.srcSeasonOf = function(date){
+  date = EIS.srcParseDate(date);
   const y = date.getUTCFullYear();
   const day = Date.UTC(y, date.getUTCMonth(), date.getUTCDate()) / 86400000;
   const sh = EIS.SRC_SHOULDER_DAYS;
@@ -901,6 +912,7 @@ EIS.srcSeasonOf = function(date){
 // Autumn runs summer -> winter, so warmth is the inverse of position. Values can
 // fall outside [0,1] for exceptional shoulder events; that is how records classify.
 EIS.srcSeasonWarmth = function(date){
+  date = EIS.srcParseDate(date);
   const key = EIS.srcSeasonOf(date);
   if (!key) return null;
   const s = EIS.SRC_SEASONS[key];
@@ -924,7 +936,7 @@ EIS.srcSubtypeFor = function(date){
 };
 
 window.__eisTests.push((t, approx) => {
-  const cls = (iso) => EIS.srcSubtypeFor(new Date(iso));
+  const cls = (iso) => EIS.srcSubtypeFor(EIS.srcParseDate(iso));
 
   // All seven records must classify correctly. Six fall OUTSIDE the core windows,
   // so `w` extrapolates past [0,1] — that is intended, not a bug.
@@ -941,7 +953,38 @@ window.__eisTests.push((t, approx) => {
 
   // St. Louis is the constraint that fixes the 0.2/0.8 cut points.
   t('St. Louis sits at w = 0.74',
-    approx(EIS.srcSeasonWarmth(new Date('2022-05-13T02:00')), 0.741, 0.01));
+    approx(EIS.srcSeasonWarmth(EIS.srcParseDate('2022-05-13T02:00')), 0.741, 0.01));
+
+  // A bare 'YYYY-MM-DDTHH:mm' must NOT be read as local time. Under the old
+  // `new Date(iso)` this assertion fails in every non-UTC zone, and east of UTC+2
+  // it also drags the record's calendar day (and its warmth) back by one.
+  t('bare ISO parses as UTC',
+    EIS.srcParseDate('2022-05-13T02:00').getTime() === Date.UTC(2022,4,13,2,0));
+  t('explicit Z is left alone',
+    EIS.srcParseDate('2022-05-13T02:00Z').getTime() === Date.UTC(2022,4,13,2,0));
+  t('explicit offset is left alone',
+    EIS.srcParseDate('2022-05-13T02:00+02:00').getTime() === Date.UTC(2022,4,13,0,0));
+  t('a Date passes through untouched', (() => {
+    const d = new Date(Date.UTC(2022,4,13,2,0));
+    return EIS.srcParseDate(d) === d;
+  })());
+
+  // Classification must not depend on where the viewer is sitting. Every record's
+  // UTC calendar day is pinned by the parse, so warmth is a pure function of the
+  // string — no local-midnight boundary can move it.
+  EIS.SRC_RECORDS.forEach(r => {
+    const md = r.dateISO.slice(0,10).split('-').map(Number);
+    t(r.city + ' parses to its literal calendar day', (() => {
+      const d = EIS.srcParseDate(r.dateISO);
+      return d.getUTCFullYear() === md[0] && d.getUTCMonth() === md[1]-1 &&
+             d.getUTCDate() === md[2];
+    })());
+  });
+
+  // The generator builds dates from UTC epoch days, so it is already timezone-safe.
+  // Verify rather than assume: every generated date must sit at exact UTC midnight.
+  t('generated dates are UTC midnight',
+    EIS.srcSeason(2026).every(e => e.date.getTime() % 86400000 === 0));
 });
 
 // Deterministic: same year always yields the same series. The three subtypes SHARE
@@ -1058,7 +1101,7 @@ window.__eisTests.push((t, approx) => {
   // Each record's stored subtype must match what the migration rule computes.
   R.forEach(r => {
     t(r.city + ' subtype matches migration rule',
-      EIS.srcSubtypeFor(new Date(r.dateISO)) === r.subtype);
+      EIS.srcSubtypeFor(EIS.srcParseDate(r.dateISO)) === r.subtype);
   });
 
   // Every bearing must fall inside its subtype's band. Minot (19.5) and
@@ -1082,7 +1125,7 @@ window.__eisTests.push((t, approx) => {
 
   // Six of seven fall outside the core windows — the validator must warn, not reject.
   const inCore = R.filter(r => {
-    const w = EIS.srcSeasonWarmth(new Date(r.dateISO));
+    const w = EIS.srcSeasonWarmth(EIS.srcParseDate(r.dateISO));
     return w >= 0 && w <= 1;
   });
   t('only St. Louis is in-window', inCore.length === 1 && inCore[0].city.indexOf('St. Louis') === 0);
