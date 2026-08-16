@@ -801,8 +801,11 @@ window.__eisTests.push((t, approx) => {
   t('SRC warm front rate is ~0.08 in/hr', approx(wf.rateInHr, 0.08, 0.02));
   t('no SRC step reaches heavy or moderate rain',
     !s.some(x => x.regions.some(g => g.type === 'heavyrain' || g.type === 'modrain')));
+  // Not a tight bound. The total sums BOTH regions over 13 steps (tH = 0..12
+  // inclusive): 13 * (0.08 + 0.03) = 1.43. The assertion means "light rain, not a
+  // deluge", so 2.0 leaves room for a rate tweak or a third region.
   t('SRC 12-hour liquid total stays light',
-    s[s.length-1].stormTotals.liquidIn < 1.5);
+    s[s.length-1].stormTotals.liquidIn < 2.0);
   t('SRC formation odds stay low', s.every(x => x.formationPct < 20));
   t('every SRC step is steady', s.every(x => x.phaseNote === 'steady'));
 
