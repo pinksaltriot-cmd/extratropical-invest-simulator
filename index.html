@@ -283,7 +283,7 @@ EIS.sizeAt = function(deficitMb, ageFrac){
 };
 // dirDeg: compass heading the system moves toward (0=N,90=E). Adds modest
 // poleward + eastward drift typical of extratropical lows.
-EIS.advanceTrack = function(lat, lon, dirDeg, spdMph, dtH, dp){
+EIS.advanceTrack = function(lat, lon, dirDeg, spdMph, dtH, dp, noDrift){
   const distMi = spdMph * dtH;
   const br = dirDeg * Math.PI/180;
   const latRad = lat * Math.PI/180;
@@ -293,8 +293,10 @@ EIS.advanceTrack = function(lat, lon, dirDeg, spdMph, dtH, dp){
   // Drift is expressed per 6-hour step; scale so it is time-consistent at any
   // dtH. Invest mode passes dtH=6, so driftK is exactly 1 and output is unchanged.
   const driftK = dtH / 6;
-  dLat += pole * (0.15 + 0.4*dp) * driftK;
-  dLon += (0.35 + 0.3*dp) * driftK;
+  if (!noDrift){
+    dLat += pole * (0.15 + 0.4*dp) * driftK;
+    dLon += (0.35 + 0.3*dp) * driftK;
+  }
   const nlat = EIS.clamp(lat + dLat, -85, 85);
   let nlon = lon + dLon; if (nlon > 180) nlon -= 360; if (nlon < -180) nlon += 360;
   const headingDeg = (Math.atan2(dLon*Math.cos(latRad), dLat) * 180/Math.PI + 360) % 360;
@@ -396,12 +398,22 @@ EIS.simulate = function(raw){
     const deficitFrac = deficit / prof.depthMb;
 
     if (i > 0){
-      const mv = EIS.advanceTrack(lat, lon, n.dir, n.spd, stepH, dp);
+      const mv = EIS.advanceTrack(lat, lon, n.dir, n.spd, stepH, dp, n.srcMode);
       lat = mv.lat; lon = mv.lon; var heading = mv.headingDeg, speed = mv.speedMph;
     } else { heading = n.dir; speed = n.spd; }
 
-    const wind = EIS.windFromDeficit(deficit);
-    const size = EIS.sizeAt(deficit, ageFrac);
+    // SRC bypasses both relations rather than retuning them. windFromDeficit gives
+    // 22 mph at a 3.25 mb deficit; any coefficient yielding 15 mph implies ~1011.4 mb,
+    // contradicting the 1010 mb definition. sizeAt floors at a 60 mi radius, which is
+    // larger than an entire 40-45 mi SRC. At 15 mph there are no gale winds anywhere,
+    // so the field reports rain-shield radius, not gale radius.
+    const wind = n.srcMode
+      ? { sustained: EIS.SRC.WIND_MPH,
+          gust: Math.round(EIS.SRC.WIND_MPH * EIS.SRC.GUST_FACTOR) }
+      : EIS.windFromDeficit(deficit);
+    const size = n.srcMode
+      ? { radiusMi: Math.round(EIS.SRC.RADIUS_MI), category: 'rain shield' }
+      : EIS.sizeAt(deficit, ageFrac);
     const core = EIS.coreTemp(n, ageFrac, dp);
     const regions = EIS.precipByRegion(n, dp * EIS.clamp(deficitFrac+0.15,0,1),
                                        stepH, n.srcMode ? EIS.SRC.REGIONS : null);
@@ -761,6 +773,21 @@ EIS.SRC_DEFAULT_INPUTS = {
   investStrength:5, advisoryISO:'2026-10-15T02:00',
   srcMode:true, srcSubtype:'CSRC', srcLifetimeH:12,
 };
+
+window.__eisTests.push((t, approx) => {
+  const r = EIS.simulate(EIS.SRC_DEFAULT_INPUTS);
+  const s = r.steps[2];
+  t('SRC wind is 15 mph', s.windMph === 15);
+  t('SRC gust is 20 mph', s.gustMph === 20);
+  t('SRC radius is shield-scale', s.sizeMi >= 40 && s.sizeMi <= 45);
+  t('SRC size is labelled rain shield', s.sizeCat === 'rain shield');
+  t('pressure-wind relation untouched for invest', EIS.windFromDeficit(25).sustained === 60);
+
+  // With drift bypassed, a due-east track must not wander in latitude.
+  const east = EIS.simulate({...EIS.SRC_DEFAULT_INPUTS, steeringDirDeg:90});
+  const dLat = Math.abs(east.steps[east.steps.length-1].lat - east.steps[0].lat);
+  t('SRC due-east track holds latitude', dLat < 0.15);
+});
 
 window.__eisTests.push((t, approx) => {
   const src = EIS.normalizeInputs({...EIS.SRC_DEFAULT_INPUTS, srcMode:true});
