@@ -464,7 +464,10 @@ EIS.simulate = function(raw){
     steps.push(step);
     if (pressureMb < minP){ minP = pressureMb; peakIndex = i; }
   }
-  return { ambient: prof.ambient, peakIndex, steps };
+  // Additive reporting fields only — nothing here feeds back into the life cycle.
+  return { ambient: prof.ambient, peakIndex, steps,
+           srcMode: !!n.srcMode, srcSpeedMph: n.spd,
+           srcRateInHr: (steps[0] && steps[0].regions[0]) ? steps[0].regions[0].rateInHr : 0 };
 };
 /* ================= MAP (Task 10) ================= */
 // Equirectangular projection into an SVG of width W, height H.
@@ -928,8 +931,24 @@ EIS.renderTimeline = function(main, result){
     Peak: <b>${pk.pressureMb} mb</b>, <b>${pk.windMph} mph</b> at +${pk.tHours}h &middot;
     life ${result.steps[result.steps.length-1].tHours}h &middot;
     max formation ${Math.max(...result.steps.map(s=>s.formationPct))}%</div>`;
-  main.querySelector('#timeline').innerHTML = summary + rows;
+  const host = main.querySelector('#timeline');
+  host.innerHTML = summary + rows;
   main.querySelector('.step')?.classList.add('open'); // first step expanded
+
+  // Eulerian duration at a fixed point, which is NOT the system lifetime.
+  if (result.srcMode){
+    const d = EIS.srcPointDuration(EIS.SRC.RADIUS_MI, result.srcSpeedMph, 0);
+    const acc = EIS.srcAccumulation(result.srcRateInHr, d);
+    // steps.length counts hour 0, so it is lifetime + 1. The last step's tHours
+    // IS the lifetime — reporting steps.length would print 13 h for a 12 h system.
+    const lifeH = result.steps[result.steps.length-1].tHours;
+    host.insertAdjacentHTML('afterbegin',
+      '<div class="src-budget"><div class="src-budget-main">Rainfall duration at a '+
+      'point: <strong>'+d.toFixed(1)+' h</strong> (centerline)</div>'+
+      '<div class="src-sub">Centerline accumulation '+acc.toFixed(2)+' in. '+
+      'Off-axis points cut a shorter chord through the shield and receive less. '+
+      'System lifetime is '+lifeH+' h — a separate quantity.</div></div>');
+  }
 };
 
 window.__eisTests.push((t, approx) => {
@@ -1552,6 +1571,69 @@ window.__eisTests.push((t, approx) => {
         .indexOf(String(b.centerlinePctHi)) === -1);
   t('budget reports the per-subtype split',
     host.textContent.indexOf('CSRC 8') !== -1);
+});
+
+window.__eisTests.push((t, approx) => {
+  const mkHost = () => {
+    const d = document.createElement('div');
+    d.innerHTML = '<div id="timeline"></div>';
+    return d;
+  };
+  const render = (inputs) => {
+    const host = mkHost();
+    const res = EIS.simulate(inputs);
+    EIS.renderTimeline(host, res);
+    return { host, res };
+  };
+
+  // simulate must carry the fields the banner needs. Additive only.
+  const src = EIS.simulate(EIS.SRC_DEFAULT_INPUTS);
+  t('simulate flags SRC mode', src.srcMode === true);
+  t('simulate exposes the steering speed', src.srcSpeedMph === 35);
+  t('simulate exposes the warm-front rate', approx(src.srcRateInHr, 0.08, 0.001));
+  const inv = EIS.simulate(EIS.DEFAULT_INPUTS);
+  t('simulate flags invest mode as not SRC', inv.srcMode === false);
+
+  // Point duration at the centerline: a 42.5 mi radius shield at 35 mph cuts a
+  // 85 mi chord, so a point on the axis rains for ~2.4 h.
+  const d0 = EIS.srcPointDuration(EIS.SRC.RADIUS_MI, 35, 0);
+  t('centerline point duration is 2.0-3.0 h at 35 mph', d0 >= 2.0 && d0 <= 3.0);
+
+  const { host, res } = render(EIS.SRC_DEFAULT_INPUTS);
+  const banner = host.querySelector('#timeline .src-budget');
+  t('SRC output opens with a point-duration banner', !!banner);
+  t('banner is the first child of the timeline',
+    host.querySelector('#timeline').firstElementChild === banner);
+  t('banner prints the centerline duration in 2.0-3.0 h', !!banner && (() => {
+    const m = banner.textContent.match(/([\d.]+) h\b/);
+    return !!m && +m[1] >= 2.0 && +m[1] <= 3.0;
+  })());
+  t('banner prints a non-zero centerline accumulation', !!banner &&
+    /Centerline accumulation 0\.\d\d in/.test(banner.textContent));
+
+  // steps.length counts hour 0 as well, so it is lifetime + 1. The banner must
+  // report the LIFETIME: 12 h for the default, not 13.
+  t('the default SRC really is 13 steps for a 12 h life', res.steps.length === 13);
+  t('banner reports the 12 h lifetime, not the 13 step count', !!banner &&
+    banner.textContent.indexOf('System lifetime is 12 h') !== -1);
+  t('banner never prints the step count as the lifetime', !!banner &&
+    banner.textContent.indexOf('System lifetime is 13 h') === -1);
+  t('banner lifetime matches the last step\'s tHours', !!banner &&
+    banner.textContent.indexOf(
+      'System lifetime is ' + res.steps[res.steps.length-1].tHours + ' h') !== -1);
+
+  // Same check at a different lifetime, so the test cannot pass by coincidence.
+  const long = render({...EIS.SRC_DEFAULT_INPUTS, srcLifetimeH: 22});
+  t('a 22 h SRC reports 22 h, not 23',
+    long.host.querySelector('#timeline .src-budget').textContent
+        .indexOf('System lifetime is 22 h') !== -1);
+
+  // Invest mode must gain nothing.
+  const investHost = render(EIS.DEFAULT_INPUTS).host;
+  t('invest output has no point-duration banner',
+    !investHost.querySelector('#timeline .src-budget'));
+  t('invest output still opens with its summary',
+    investHost.querySelector('#timeline').firstElementChild.className === 'summary');
 });
 
 // The seven SRC records. Full derivations in docs/glossary.md.
