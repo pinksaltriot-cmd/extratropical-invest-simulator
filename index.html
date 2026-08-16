@@ -645,6 +645,38 @@ window.__eisTests.push((t) => {
   t('phaseNote genesis = organizing', EIS.phaseNote(0, 0, 45, false) === 'organizing');
 });
 
+/* ===== INVEST-MODE REGRESSION GUARD ===== */
+// Locks default-input invest output so SRC changes cannot silently alter it.
+// If this fails, an SRC change leaked into a shared code path.
+EIS.__regressionFingerprint = function(){
+  const r = EIS.simulate(EIS.DEFAULT_INPUTS);
+  const s = r.steps;
+  const last = s[s.length-1];
+  return [
+    s.length,
+    r.peakIndex,
+    s[0].pressureMb,
+    last.pressureMb,
+    Math.min(...s.map(x=>x.pressureMb)),
+    last.stormTotals.snowIn,
+    last.stormTotals.liquidIn,
+    Math.round(last.lat*10)/10,
+    Math.round(last.lon*10)/10,
+    s.map(x=>x.regions.length).join(''),
+  ].join('|');
+};
+
+EIS.__REGRESSION_BASELINE = '34|7|1013|1010|962|1502.7|248|85|-144.1|4444444444444444444444444444444444';
+
+window.__eisTests.push((t) => {
+  // Baseline captured from the pre-SRC engine. Do not edit this string to make
+  // a test pass — a mismatch means invest-mode behavior changed.
+  t('invest regression: default fingerprint unchanged',
+    EIS.__regressionFingerprint() === EIS.__REGRESSION_BASELINE);
+  t('invest regression: still 6-hour steps',
+    EIS.simulate(EIS.DEFAULT_INPUTS).steps[1].tHours === 6);
+});
+
 EIS.init = function(){
   if (/(\?|&)selftest\b/.test(location.search)) return; // harness owns the page
   const aside = document.getElementById('inputs');
