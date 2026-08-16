@@ -944,6 +944,70 @@ window.__eisTests.push((t, approx) => {
     approx(EIS.srcSeasonWarmth(new Date('2022-05-13T02:00')), 0.741, 0.01));
 });
 
+// Deterministic: same year always yields the same series. The three subtypes SHARE
+// one wave train — 15 events total, not 15 per subtype.
+EIS.srcSeason = function(year){
+  const out = [];
+  for (const key of ['spring','autumn']){
+    const s = EIS.SRC_SEASONS[key];
+    const a = EIS.__srcDay(year, s.startMD), b = EIS.__srcDay(year, s.endMD);
+    const stepDays = s.intervalH / 24;
+    for (let d = a; d <= b + 1e-9; d += stepDays){
+      const date = new Date(d * 86400000);
+      const subtype = EIS.srcSubtypeFor(date);
+      const st = EIS.SRC_SUBTYPES[subtype];
+      out.push({
+        season: key, date, subtype,
+        warmth: Math.round(EIS.srcSeasonWarmth(date)*1000)/1000,
+        genesis: st.genesis, lat: st.lat, lon: st.lon,
+        bearing: st.defaultBearing,
+      });
+    }
+  }
+  out.sort((x,y) => x.date - y.date);
+  return out;
+};
+
+window.__eisTests.push((t) => {
+  const season = EIS.srcSeason(2026);
+  const autumn = season.filter(e => e.season === 'autumn');
+  const spring = season.filter(e => e.season === 'spring');
+  const count = (st) => season.filter(e => e.subtype === st).length;
+
+  t('15 events per year', season.length === 15);
+  t('9 autumn events', autumn.length === 9);
+  t('6 spring events', spring.length === 6);
+  t('spring interval is exactly 2x autumn',
+    EIS.SRC_SEASONS.spring.intervalH === 2 * EIS.SRC_SEASONS.autumn.intervalH);
+  t('subtype split is 4/8/3',
+    count('SSRC') === 4 && count('CSRC') === 8 && count('NSRC') === 3);
+
+  // Autumn migrates north -> south; spring migrates south -> north.
+  const latOf = (e) => EIS.SRC_SUBTYPES[e.subtype].lat;
+  t('autumn starts north of where it ends', latOf(autumn[0]) > latOf(autumn[autumn.length-1]));
+  t('spring ends north of where it starts', latOf(spring[spring.length-1]) > latOf(spring[0]));
+
+  // The two failures the migration rule exists to prevent.
+  t('no NSRC in late October',
+    !autumn.some(e => e.subtype === 'NSRC' && e.date.getUTCMonth() === 9 && e.date.getUTCDate() > 20));
+  t('no SSRC in late September',
+    !autumn.some(e => e.subtype === 'SSRC' && e.date.getUTCMonth() === 8));
+
+  t('generator is deterministic',
+    JSON.stringify(EIS.srcSeason(2026).map(e=>e.subtype)) ===
+    JSON.stringify(EIS.srcSeason(2026).map(e=>e.subtype)));
+
+  // Leap year: the window boundaries are absolute dates, so nothing shifts.
+  const leap = EIS.srcSeason(2028);
+  const lcount = (st) => leap.filter(e => e.subtype === st).length;
+  t('leap year 2028 still has 15 events', leap.length === 15);
+  t('leap year 2028 still splits 9/6',
+    leap.filter(e=>e.season==='autumn').length === 9 &&
+    leap.filter(e=>e.season==='spring').length === 6);
+  t('leap year 2028 still splits 4/8/3',
+    lcount('SSRC') === 4 && lcount('CSRC') === 8 && lcount('NSRC') === 3);
+});
+
 // Rainfall duration at a FIXED POINT (Eulerian), distinct from system lifetime
 // (Lagrangian). A point offset `offsetMi` from the track axis cuts a chord
 // 2*sqrt(r^2 - d^2) through the shield; the centerline chord is the full diameter.
