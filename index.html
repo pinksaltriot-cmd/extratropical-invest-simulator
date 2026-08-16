@@ -373,7 +373,9 @@ EIS.precipByRegion = function(n, dp, stepH, regions){
 EIS.formationOdds = function(n, dp, deficitFrac){
   return Math.round(EIS.clamp(100 * (0.30*n.s0 + dp*EIS.clamp(deficitFrac,0,1)), 0, 100));
 };
-EIS.phaseNote = function(trend24, deficitMb, depthMb, dying){
+EIS.phaseNote = function(trend24, deficitMb, depthMb, dying, srcMode){
+  // An SRC has no organize/peak/occlude life cycle — it holds one state and ends.
+  if (srcMode) return 'steady';
   if (dying) return 'dissipating';
   if (trend24 <= -24) return 'bombing out';
   if (trend24 < -3) return 'deepening';
@@ -382,8 +384,11 @@ EIS.phaseNote = function(trend24, deficitMb, depthMb, dying){
 };
 EIS.simulate = function(raw){
   const n = EIS.normalizeInputs(raw);
-  const dp = EIS.developmentPotential(n);
   const prof = EIS.pressureProfile(n);
+  // An SRC's development potential is fixed by its definition — a 1010 mb system that
+  // by construction never develops — rather than derived from the environment.
+  // prof.dp carries that fixed value; invest mode still derives it as before.
+  const dp = n.srcMode ? prof.dp : EIS.developmentPotential(n);
   const stepH = n.srcMode ? EIS.SRC.STEP_H : 6;
   if (prof.tDeathH < 6) prof.tDeathH = 6;
   const steps = [];
@@ -438,7 +443,7 @@ EIS.simulate = function(raw){
       lat: Math.round(lat*10)/10, lon: Math.round(lon*10)/10,
       headingDeg: heading, speedMph: speed,
       coreTempF: core.tempF, coreTag: core.tag,
-      phaseNote: EIS.phaseNote(trend24, deficit, prof.depthMb, dying),
+      phaseNote: EIS.phaseNote(trend24, deficit, prof.depthMb, dying, n.srcMode),
       regions,
       stormTotals: { snowIn: Math.round(totals.snowIn*10)/10,
                      liquidIn: Math.round(totals.liquidIn*10)/10 },
@@ -787,6 +792,36 @@ window.__eisTests.push((t, approx) => {
   const east = EIS.simulate({...EIS.SRC_DEFAULT_INPUTS, steeringDirDeg:90});
   const dLat = Math.abs(east.steps[east.steps.length-1].lat - east.steps[0].lat);
   t('SRC due-east track holds latitude', dLat < 0.15);
+});
+
+window.__eisTests.push((t, approx) => {
+  const s = EIS.simulate(EIS.SRC_DEFAULT_INPUTS).steps;
+  const wf = s[2].regions.find(g => g.region === 'Warm front');
+  t('SRC warm front is light rain', wf.type === 'lightrain');
+  t('SRC warm front rate is ~0.08 in/hr', approx(wf.rateInHr, 0.08, 0.02));
+  t('no SRC step reaches heavy or moderate rain',
+    !s.some(x => x.regions.some(g => g.type === 'heavyrain' || g.type === 'modrain')));
+  t('SRC 12-hour liquid total stays light',
+    s[s.length-1].stormTotals.liquidIn < 1.5);
+  t('SRC formation odds stay low', s.every(x => x.formationPct < 20));
+  t('every SRC step is steady', s.every(x => x.phaseNote === 'steady'));
+
+  // prof.dp must actually be CONSUMED. If simulate ever goes back to deriving dp
+  // from the environment for SRC, perturbing prof.dp stops moving the precip rate
+  // and this fails — which is exactly how it silently went dead the first time.
+  const orig = EIS.pressureProfile;
+  let bumped;
+  try {
+    EIS.pressureProfile = function(nn){
+      const p = orig(nn);
+      if (nn.srcMode) p.dp = 0.5;
+      return p;
+    };
+    bumped = EIS.simulate(EIS.SRC_DEFAULT_INPUTS)
+      .steps[2].regions.find(g => g.region === 'Warm front').rateInHr;
+  } finally { EIS.pressureProfile = orig; }
+  t('prof.dp drives SRC precip rate', bumped > wf.rateInHr);
+  t('pressureProfile restored after probe', EIS.pressureProfile === orig);
 });
 
 window.__eisTests.push((t, approx) => {
