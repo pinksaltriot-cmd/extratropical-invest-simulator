@@ -646,10 +646,13 @@ window.__eisTests.push((t) => {
 });
 
 /* ===== INVEST-MODE REGRESSION GUARD ===== */
-// Locks default-input invest output so SRC changes cannot silently alter it.
-// If this fails, an SRC change leaked into a shared code path.
+// Locks the DEFAULT-INPUT invest trajectory. Narrow by design: this exercises one
+// input vector only, so a regression that appears only at non-default inputs will
+// NOT be caught here. Treat a pass as "the default path is untouched", nothing more.
+// Simulates from a copy so the guard does not depend on simulate() leaving its
+// argument unmutated.
 EIS.__regressionFingerprint = function(){
-  const r = EIS.simulate(EIS.DEFAULT_INPUTS);
+  const r = EIS.simulate({...EIS.DEFAULT_INPUTS});
   const s = r.steps;
   const last = s[s.length-1];
   return [
@@ -670,11 +673,11 @@ EIS.__REGRESSION_BASELINE = '34|7|1013|1010|962|1502.7|248|85|-144.1|44444444444
 
 window.__eisTests.push((t) => {
   // Baseline captured from the pre-SRC engine. Do not edit this string to make
-  // a test pass — a mismatch means invest-mode behavior changed.
+  // a test pass — a mismatch means the default-input invest trajectory moved.
   t('invest regression: default fingerprint unchanged',
     EIS.__regressionFingerprint() === EIS.__REGRESSION_BASELINE);
   t('invest regression: still 6-hour steps',
-    EIS.simulate(EIS.DEFAULT_INPUTS).steps[1].tHours === 6);
+    EIS.simulate({...EIS.DEFAULT_INPUTS}).steps[1].tHours === 6);
 });
 
 EIS.init = function(){
