@@ -279,6 +279,40 @@ EIS.pressureProfile = function(n){
   }
   return { ambient, depthMb, tPeakH, tDeathH, deficitAt, pressureAt, dp };
 };
+/* ===== SURFACE TYPE =====
+   'sea' is the EXACT identity case, deliberately: DEFAULT_INPUTS is sea, so any
+   factor other than a literal 1 would move the invest regression fingerprint.
+   Land is a modifier applied on top of an unchanged sea baseline. An unknown or
+   missing surfaceType also falls back to the sea identity, so a caller that
+   hand-builds an `n` without the field gets the old behaviour. */
+
+// Land is roughly twice as rough as open water, and the surface layer bleeds
+// more momentum out of the gradient wind over it. Operational marine-to-land
+// 10 m reduction factors run ~0.8-0.9 depending on terrain; 0.88 sits at the
+// open/mixed-terrain end, which is what a synoptic-scale low crossing a
+// continent actually sees averaged over its wind field.
+EIS.surfaceFrictionFactor = function(surfaceType){
+  return surfaceType === 'land' ? 0.88 : 1;
+};
+
+// Land removes the continuous evaporative source under the storm. The cut is
+// deliberately modest (0.90) rather than severe: a continental low still draws
+// most of its moisture from air advected off an upstream ocean, so the local
+// surface only accounts for part of the supply. Anything much stronger stops a
+// land invest from producing meaningful precipitation at all.
+EIS.surfaceMoistureFactor = function(surfaceType){
+  return surfaceType === 'land' ? 0.90 : 1;
+};
+
+// Applied at the windFromDeficit CALL SITE, not inside it, so the pressure-wind
+// relation itself stays a pure function of the deficit (SRC already branches
+// around that call the same way).
+EIS.applySurfaceFriction = function(wind, surfaceType){
+  const f = EIS.surfaceFrictionFactor(surfaceType);
+  if (f === 1) return wind;                       // sea: untouched, same object
+  return { sustained: Math.round(wind.sustained*f), gust: Math.round(wind.gust*f) };
+};
+
 // Pressure-wind relation: sustained wind (mph) scales with sqrt of the
 // central-pressure deficit vs ambient; gust factor 1.35x sustained.
 EIS.windFromDeficit = function(deficitMb){
@@ -336,8 +370,10 @@ EIS.precipForRegion = function(region, n, dp, stepH){
   const p = EIS.REGION_PROPS[region];
   const seaF = EIS.seasonFactor(n.month, n.lat);
   const regionTempF = n.tempF + p.tempOffset - 25*seaF*(Math.abs(n.lat)/90);
-  // Liquid-equivalent precip rate (in/hr).
-  const liquidEq = EIS.clamp(dp * n.h * p.lift * 2.2, 0, 3);
+  // Liquid-equivalent precip rate (in/hr). Moisture supply is surface-dependent:
+  // land cuts it, sea multiplies by an exact 1 and is therefore untouched.
+  const liquidEq = EIS.clamp(
+    dp * n.h * p.lift * 2.2 * EIS.surfaceMoistureFactor(n.surfaceType), 0, 3);
 
   if (liquidEq < 0.005){
     // Non-precipitating obscuration.
@@ -428,7 +464,7 @@ EIS.simulate = function(raw){
     const wind = n.srcMode
       ? { sustained: EIS.SRC.WIND_MPH,
           gust: Math.round(EIS.SRC.WIND_MPH * EIS.SRC.GUST_FACTOR) }
-      : EIS.windFromDeficit(deficit);
+      : EIS.applySurfaceFriction(EIS.windFromDeficit(deficit), n.surfaceType);
     const size = n.srcMode
       ? { radiusMi: Math.round(EIS.SRC.RADIUS_MI), category: 'rain shield' }
       : EIS.sizeAt(deficit, ageFrac);
@@ -1048,6 +1084,83 @@ window.__eisTests.push((t) => {
   t('phaseNote genesis = organizing', EIS.phaseNote(0, 0, 45, false) === 'organizing');
 });
 
+/* ===== SURFACE TYPE =====
+   surfaceType was inert for the whole life of the engine: it reached
+   normalizeInputs and the form, but no physics path read it, so 'land' and 'sea'
+   produced byte-identical output. These tests exist so it cannot go dead again.
+
+   SEA IS THE EXACT IDENTITY CASE. DEFAULT_INPUTS is surfaceType:'sea', so both
+   factors must be exactly 1 (not 0.999, not "close") or the invest regression
+   fingerprint moves. Land is a modifier on an unchanged sea baseline. */
+window.__eisTests.push((t, approx) => {
+  t('sea friction factor is exactly 1', EIS.surfaceFrictionFactor('sea') === 1);
+  t('sea moisture factor is exactly 1', EIS.surfaceMoistureFactor('sea') === 1);
+  t('unknown surface falls back to the sea identity',
+    EIS.surfaceFrictionFactor(undefined) === 1 && EIS.surfaceMoistureFactor(undefined) === 1);
+  t('land friction reduces wind', EIS.surfaceFrictionFactor('land') < 1);
+  t('land moisture reduces supply', EIS.surfaceMoistureFactor('land') < 1);
+  t('sea friction is a pass-through, not a rebuild', (() => {
+    const w = EIS.windFromDeficit(40);
+    return EIS.applySurfaceFriction(w, 'sea') === w;   // same object identity
+  })());
+
+  // The dead-code guard: identical inputs but for the surface must NOT serialize
+  // the same. This is exactly the assertion that would have caught the original.
+  const sea  = EIS.simulate({...EIS.DEFAULT_INPUTS, surfaceType:'sea'});
+  const land = EIS.simulate({...EIS.DEFAULT_INPUTS, surfaceType:'land'});
+  t('surfaceType is not inert', JSON.stringify(sea) !== JSON.stringify(land));
+
+  const maxWind = r => Math.max(...r.steps.map(s => s.windMph));
+  const maxGust = r => Math.max(...r.steps.map(s => s.gustMph));
+  t('land yields lower sustained wind than sea', maxWind(land) < maxWind(sea));
+  t('land yields lower gusts than sea', maxGust(land) < maxGust(sea));
+
+  const tot = r => r.steps[r.steps.length-1].stormTotals;
+  t('land yields lower liquid than sea', tot(land).liquidIn < tot(sea).liquidIn);
+  t('land yields lower snow than sea', tot(land).snowIn < tot(sea).snowIn);
+
+  // Guard the magnitude from the other side: a land invest must still be a storm.
+  t('land invest still precipitates', tot(land).liquidIn > 0 && tot(land).snowIn > 0);
+  t('land wind stays within 20% of sea', maxWind(land) > maxWind(sea) * 0.8);
+
+  // Sea must be untouched. The invest regression fingerprint (below) is the
+  // primary lock; this pins the mechanism rather than one input vector.
+  const n = EIS.normalizeInputs({...EIS.DEFAULT_INPUTS, surfaceType:'sea'});
+  const bare = {...n}; delete bare.surfaceType;
+  t('sea precip equals surface-agnostic precip', JSON.stringify(
+      EIS.precipForRegion('Comma head', n, 0.6)) === JSON.stringify(
+      EIS.precipForRegion('Comma head', bare, 0.6)));
+
+  // SRC hard-bypasses windFromDeficit at 15 mph, so friction cannot reach it
+  // even though SRC_DEFAULT_INPUTS is land.
+  const srcLand = EIS.simulate(EIS.SRC_DEFAULT_INPUTS);
+  const srcSea  = EIS.simulate({...EIS.SRC_DEFAULT_INPUTS, surfaceType:'sea'});
+  t('SRC wind is friction-immune', srcLand.steps[2].windMph === 15 &&
+     srcSea.steps[2].windMph === 15);
+  t('SRC gust is friction-immune', srcLand.steps[2].gustMph === srcSea.steps[2].gustMph);
+  // Moisture is NOT bypassed: SRC is a land system and pays the penalty. Its
+  // humidity was re-tuned so the defined 0.08 in/hr survives that penalty.
+  // At the SRC's own dp the land and sea rates (0.076 vs 0.084) both round to
+  // the reported 0.08, so probe the relation at a dp where 2 dp cannot hide it.
+  const wfOf = r => r.steps[2].regions.find(g => g.region === 'Warm front').rateInHr;
+  const srcN = EIS.normalizeInputs(EIS.SRC_DEFAULT_INPUTS);
+  t('SRC inputs really are land', srcN.surfaceType === 'land');
+  t('SRC moisture penalty is real',
+    EIS.precipForRegion('Warm front', srcN, 0.5).rateInHr <
+    EIS.precipForRegion('Warm front', {...srcN, surfaceType:'sea'}, 0.5).rateInHr);
+  t('SRC warm-front rate survives the penalty', approx(wfOf(srcLand), 0.08, 0.005));
+  // The re-tune raised SRC humidity to exactly 80. precipForRegion flips a
+  // low-lift region to mist above n.h > 0.8, so 80 is the ceiling: one point
+  // higher and the SRC loses its warm-sector rain entirely. Pin the boundary.
+  t('SRC humidity sits at the mist boundary, not past it',
+    EIS.SRC_DEFAULT_INPUTS.humidityPct === 80 &&
+    EIS.normalizeInputs(EIS.SRC_DEFAULT_INPUTS).h <= 0.8);
+  t('SRC constant and default humidity agree',
+    EIS.SRC.HUMIDITY_PCT === EIS.SRC_DEFAULT_INPUTS.humidityPct);
+  t('SRC warm sector still drizzles rather than misting',
+    srcLand.steps[2].regions.find(g => g.region === 'Warm sector').water === 'liquid');
+});
+
 /* ===== INVEST-MODE REGRESSION GUARD ===== */
 // Locks the DEFAULT-INPUT invest trajectory. Narrow by design: this exercises one
 // input vector only, so a regression that appears only at non-default inputs will
@@ -1111,7 +1224,14 @@ EIS.SRC = {
   GUST_FACTOR: 1.35,       // matches windFromDeficit's factor
   STEP_H: 1,
   TEMP_F: 50,
-  HUMIDITY_PCT: 75,
+  // 80, not 75: an SRC is a LAND system, so it pays the land moisture penalty
+  // (0.90). The 0.08 in/hr warm-front rate is part of the SRC definition -- the
+  // term specifies the output and the inputs exist to produce it -- so the
+  // humidity is what moves to hold the rate, not the physics or the assertion.
+  // 0.08(dp) * 0.80(h) * 0.60(warm-front lift) * 2.2 * 0.90 = 0.076 -> 0.08.
+  // Do not raise past 80: precipForRegion flips the warm sector to mist above
+  // n.h > 0.8, which would silently delete the SRC's second rain region.
+  HUMIDITY_PCT: 80,
   REGIONS: ['Warm front', 'Warm sector'],   // no comma head: never occludes
 };
 
@@ -1128,7 +1248,7 @@ EIS.SRC_SUBTYPES = {
 };
 
 EIS.SRC_DEFAULT_INPUTS = {
-  surfaceType:'land', surfaceTempF:50, baroclinicity:8, shearMph:10, humidityPct:75,
+  surfaceType:'land', surfaceTempF:50, baroclinicity:8, shearMph:10, humidityPct:80,
   latitudeDeg:39.74, lonDeg:-104.99, steeringDirDeg:95, steeringMph:35,
   investStrength:5, advisoryISO:'2026-10-15T02:00',
   srcMode:true, srcSubtype:'CSRC', srcLifetimeH:12,
