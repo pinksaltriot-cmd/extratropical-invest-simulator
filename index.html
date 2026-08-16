@@ -240,7 +240,8 @@ EIS.pressureProfile = function(n){
   function pressureAt(tH){ return ambient - deficitAt(tH); }
   // Death: first 6-hourly time after peak where deficit < 3 mb (cap 240 h).
   let tDeathH = tPeakH;
-  for (let th = Math.ceil(tPeakH/6)*6; th <= 240; th += 6){
+  const scanH = n.srcMode ? EIS.SRC.STEP_H : 6;
+  for (let th = Math.ceil(tPeakH/scanH)*scanH; th <= 240; th += scanH){
     if (deficitAt(th) < 3){ tDeathH = th; break; }
     tDeathH = th;
   }
@@ -270,8 +271,11 @@ EIS.advanceTrack = function(lat, lon, dirDeg, spdMph, dtH, dp){
   let dLat = (distMi * Math.cos(br)) / 69;
   let dLon = (distMi * Math.sin(br)) / (69 * Math.max(0.2, Math.cos(latRad)));
   const pole = lat >= 0 ? 1 : -1;
-  dLat += pole * (0.15 + 0.4*dp);   // beta / poleward drift
-  dLon += 0.35 + 0.3*dp;            // eastward drift
+  // Drift is expressed per 6-hour step; scale so it is time-consistent at any
+  // dtH. Invest mode passes dtH=6, so driftK is exactly 1 and output is unchanged.
+  const driftK = dtH / 6;
+  dLat += pole * (0.15 + 0.4*dp) * driftK;
+  dLon += (0.35 + 0.3*dp) * driftK;
   const nlat = EIS.clamp(lat + dLat, -85, 85);
   let nlon = lon + dLon; if (nlon > 180) nlon -= 360; if (nlon < -180) nlon += 360;
   const headingDeg = (Math.atan2(dLon*Math.cos(latRad), dLat) * 180/Math.PI + 360) % 360;
@@ -293,7 +297,8 @@ EIS.classifyPrecip = function(kind, rateInHr){
   return 'lightrain';
 };
 
-EIS.precipForRegion = function(region, n, dp){
+EIS.precipForRegion = function(region, n, dp, stepH){
+  stepH = (stepH == null) ? 6 : stepH;
   const p = EIS.REGION_PROPS[region];
   const seaF = EIS.seasonFactor(n.month, n.lat);
   const regionTempF = n.tempF + p.tempOffset - 25*seaF*(Math.abs(n.lat)/90);
@@ -330,14 +335,16 @@ EIS.precipForRegion = function(region, n, dp){
       type = EIS.classifyPrecip('rain', liquidEq); water='liquid'; rateInHr = round2(liquidEq);
     }
   }
-  return { region, type, rateInHr, accumIn: round2(rateInHr*6), water };
+  return { region, type, rateInHr, accumIn: round2(rateInHr*stepH), water };
 
   function mk(id){ return { region, type:id, rateInHr:0, accumIn:0, water:'none' }; }
   function round2(x){ return Math.round(x*100)/100; }
 };
 
-EIS.precipByRegion = function(n, dp){
-  return EIS.REGIONS.map(r => EIS.precipForRegion(r, n, dp)).filter(Boolean);
+EIS.precipByRegion = function(n, dp, stepH, regions){
+  return (regions || EIS.REGIONS)
+    .map(r => EIS.precipForRegion(r, n, dp, stepH))
+    .filter(Boolean);
 };
 
 // deficitFrac = current pressure deficit / max depth (0..1). Odds track organization,
@@ -356,32 +363,37 @@ EIS.simulate = function(raw){
   const n = EIS.normalizeInputs(raw);
   const dp = EIS.developmentPotential(n);
   const prof = EIS.pressureProfile(n);
+  const stepH = n.srcMode ? EIS.SRC.STEP_H : 6;
   if (prof.tDeathH < 6) prof.tDeathH = 6;
   const steps = [];
   let lat = n.lat, lon = n.lon;
   const totals = { snowIn:0, liquidIn:0 };
   let peakIndex = 0, minP = Infinity;
 
-  for (let i=0, tH=0; tH <= prof.tDeathH; i++, tH += 6){
+  for (let i=0, tH=0; tH <= prof.tDeathH; i++, tH += stepH){
     const deficit = prof.deficitAt(tH);
     const pressureMb = Math.round(prof.pressureAt(tH));
     const ageFrac = tH / prof.tDeathH;
     const deficitFrac = deficit / prof.depthMb;
 
     if (i > 0){
-      const mv = EIS.advanceTrack(lat, lon, n.dir, n.spd, 6, dp);
+      const mv = EIS.advanceTrack(lat, lon, n.dir, n.spd, stepH, dp);
       lat = mv.lat; lon = mv.lon; var heading = mv.headingDeg, speed = mv.speedMph;
     } else { heading = n.dir; speed = n.spd; }
 
     const wind = EIS.windFromDeficit(deficit);
     const size = EIS.sizeAt(deficit, ageFrac);
     const core = EIS.coreTemp(n, ageFrac, dp);
-    const regions = EIS.precipByRegion(n, dp * EIS.clamp(deficitFrac+0.15,0,1));
+    const regions = EIS.precipByRegion(n, dp * EIS.clamp(deficitFrac+0.15,0,1),
+                                       stepH, n.srcMode ? EIS.SRC.REGIONS : null);
     regions.forEach(rg => {
       if (rg.water === 'snow') totals.snowIn += rg.accumIn;
       else if (rg.water === 'liquid') totals.liquidIn += rg.accumIn;
     });
-    const prev24 = steps.length >= 4 ? steps[steps.length-4].pressureMb : pressureMb;
+    // 4 encoded "four 6-hour steps". Derive it so a 1-hour step still looks back 24 h.
+    const lookback = Math.round(24 / stepH);
+    const prev24 = steps.length >= lookback
+      ? steps[steps.length-lookback].pressureMb : pressureMb;
     const trend24 = pressureMb - prev24;
     const dying = tH >= prof.tPeakH && deficit < 3;
 
@@ -742,6 +754,23 @@ window.__eisTests.push((t, approx) => {
   t('centerline accum is ~0.2 in', approx(EIS.srcAccumulation(0.08, centre), 0.2, 0.03));
   t('off-axis accum is below centerline',
     EIS.srcAccumulation(0.08, half) < EIS.srcAccumulation(0.08, centre));
+});
+
+window.__eisTests.push((t, approx) => {
+  // Drift must be per-hour, not per-call. Two 3-hour steps should displace the
+  // same distance as one 6-hour step. Before the fix, the 3-hour path drifts twice.
+  const a = EIS.advanceTrack(40, -100, 90, 30, 6, 0.2);
+  let b = EIS.advanceTrack(40, -100, 90, 30, 3, 0.2);
+  b = EIS.advanceTrack(b.lat, b.lon, 90, 30, 3, 0.2);
+  t('drift scales with dtH (lat)', approx(a.lat, b.lat, 0.02));
+  t('drift scales with dtH (lon)', approx(a.lon, b.lon, 0.02));
+
+  // Accumulation must follow the step length, not a hardcoded 6.
+  const n = EIS.normalizeInputs(EIS.DEFAULT_INPUTS);
+  const r6 = EIS.precipForRegion('Warm front', n, 0.5, 6);
+  const r1 = EIS.precipForRegion('Warm front', n, 0.5, 1);
+  t('accum scales with stepH', approx(r6.accumIn, r1.accumIn*6, 0.02));
+  t('rate does not scale with stepH', approx(r6.rateInHr, r1.rateInHr, 1e-9));
 });
 
 // Rainfall duration at a FIXED POINT (Eulerian), distinct from system lifetime
