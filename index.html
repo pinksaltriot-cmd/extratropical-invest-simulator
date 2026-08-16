@@ -112,6 +112,57 @@ window.__eisTests.push((t, approx) => {
   t('shear too low penalized', EIS.shearFactor(0) < EIS.shearFactor(20));
 });
 
+/* ===== ADVISORY TIME IS UTC, NOT THE VIEWER'S TIMEZONE =====
+   A datetime-local control emits 'YYYY-MM-DDTHH:mm' with no designator, which
+   `new Date()` reads in the VIEWER's zone. That made the engine's output a
+   function of where the user was sitting, contradicting the determinism the
+   whole model rests on. Two separate leaks, and fixing only one makes it worse:
+
+     - n.date became a different absolute instant per zone, so every step's
+       ISO timestamp shifted (a Chicago viewer's +0h advisory landed on a
+       different calendar DAY than a Tokyo viewer's).
+     - month was accidentally stable only because a local parse was read back
+       with the local getMonth(). Switch the parse to UTC without also switching
+       to getUTCMonth() and a boundary advisory genuinely splits: Tokyo gets
+       month 2, Chicago gets month 1, feeding different seasonFactor ->
+       developmentPotential -> a materially different storm.
+
+   Every assertion below is written against absolute UTC values, so it holds in
+   every timezone or in none. */
+window.__eisTests.push((t, approx) => {
+  const at = iso => EIS.normalizeInputs({...EIS.DEFAULT_INPUTS, advisoryISO: iso});
+
+  t('bare advisory time parses as UTC, not local',
+    at('2026-01-31T23:00').date.getTime() === Date.UTC(2026, 0, 31, 23, 0));
+  t('an explicit Z changes nothing',
+    at('2026-01-31T23:00Z').date.getTime() === at('2026-01-31T23:00').date.getTime());
+  t('an explicit offset is still honoured',
+    at('2026-01-31T23:00+02:00').date.getTime() === Date.UTC(2026, 0, 31, 21, 0));
+
+  // Month is read with getUTCMonth so it matches the UTC parse. These two sit
+  // one hour either side of a month boundary: with a local read they diverge by
+  // viewer location, which is the bug.
+  t('month just before a boundary is January', at('2026-01-31T23:00').month === 1);
+  t('month just after a boundary is February', at('2026-02-01T01:00').month === 2);
+  t('year boundary stays in December', at('2026-12-31T23:30').month === 12);
+  t('year boundary rolls to January', at('2027-01-01T00:30').month === 1);
+
+  // The physics that hangs off month must land on the same value too.
+  t('boundary month drives the same seasonFactor',
+    approx(EIS.seasonFactor(at('2026-01-31T23:00').month, 44),
+           EIS.seasonFactor(1, 44), 1e-12));
+
+  // Step timestamps are the visible symptom: same inputs, same instants.
+  t('advisory instant is timezone-independent',
+    EIS.simulate({...EIS.DEFAULT_INPUTS}).steps[0].date === '2026-01-10T18:00:00.000Z');
+
+  // The fallback for an unparseable advisory must be UTC as well, or a bad
+  // input reintroduces the same drift through the back door.
+  t('unparseable advisory falls back to a fixed UTC instant',
+    at('not-a-date').date.getTime() === Date.UTC(2026, 0, 10, 18, 0));
+  t('fallback month is January', at('not-a-date').month === 1);
+});
+
 window.__eisTests.push((t) => {
   const strongWinter = EIS.normalizeInputs({...EIS.DEFAULT_INPUTS,
     baroclinicity:95, shearMph:20, humidityPct:90, latitudeDeg:48, advisoryISO:'2026-01-10T18:00'});
@@ -193,8 +244,15 @@ EIS.WORLD_LAND = [[[-59.6,-80],[-59.9,-80.5],[-60.2,-81],[-62.3,-80.9],[-64.5,-8
 EIS.clamp = (x,lo,hi) => Math.max(lo, Math.min(hi, x));
 
 EIS.normalizeInputs = function(raw){
-  const d = new Date(raw.advisoryISO);
-  const month = (isNaN(d) ? 1 : d.getMonth()+1);
+  // Advisory times are UTC, never the viewer's zone. A datetime-local control
+  // emits a bare 'YYYY-MM-DDTHH:mm', which `new Date()` would read as LOCAL --
+  // making month, and therefore seasonFactor -> developmentPotential -> the
+  // whole life cycle, a function of where the user happens to be. srcParseDate
+  // appends the missing designator; getUTCMonth then reads it back on the same
+  // clock. Both halves are required: a UTC parse read with local getMonth()
+  // splits a boundary advisory (Tokyo month 2, Chicago month 1).
+  const d = EIS.srcParseDate(raw.advisoryISO);
+  const month = (isNaN(d) ? 1 : d.getUTCMonth()+1);
   return {
     surfaceType: raw.surfaceType,
     tempF: +raw.surfaceTempF,
@@ -209,7 +267,9 @@ EIS.normalizeInputs = function(raw){
     srcMode: !!raw.srcMode,
     srcSubtype: raw.srcSubtype || null,
     srcLifetimeH: (raw.srcLifetimeH == null) ? 12 : +raw.srcLifetimeH,
-    month, date: (isNaN(d) ? new Date('2026-01-10T18:00') : d),
+    // The bad-input fallback is parsed the same way, or an unparseable
+    // advisory smuggles the viewer's zone back in.
+    month, date: (isNaN(d) ? EIS.srcParseDate('2026-01-10T18:00') : d),
   };
 };
 
