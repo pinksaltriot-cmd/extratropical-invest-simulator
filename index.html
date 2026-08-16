@@ -49,6 +49,15 @@
   table.precip td{padding:5px 6px;border-bottom:1px solid var(--panel2)}
   .totals{text-align:right;color:var(--ink2);font-size:12px;margin-top:8px}
   .summary{background:var(--panel2);border-radius:6px;padding:8px 12px;margin-bottom:8px;color:var(--ink);font-size:13px}
+  .src-cal{background:#0f1720;border:1px solid #1f2d3d;border-radius:8px;padding:14px;margin:12px 0}
+  .src-cal h3{margin:0 0 12px;font-size:14px}
+  .src-row{margin-bottom:14px}
+  .src-row-label{font-size:11px;opacity:.7;margin-bottom:5px}
+  .src-track{position:relative;height:14px;background:#16202b;border-radius:7px}
+  .src-tick{position:absolute;top:2px;width:10px;height:10px;border-radius:50%;margin-left:-5px}
+  .src-legend{display:flex;gap:14px;font-size:11px;margin-top:6px}
+  .src-legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
+  .src-note{font-size:11px;opacity:.65;line-height:1.5;margin:10px 0 0}
 </style>
 </head>
 <body>
@@ -1374,6 +1383,90 @@ window.__eisTests.push((t) => {
     lcount('SSRC') === 4 && lcount('CSRC') === 8 && lcount('NSRC') === 3);
 });
 
+EIS.SRC_COLORS = { NSRC:'#60a5fa', CSRC:'#4ade80', SSRC:'#fbbf24' };
+
+// Colored by subtype so the north->south (autumn) and south->north (spring)
+// migration is visible without reading a table.
+EIS.renderSrcCalendar = function(host, year, onPick){
+  const events = EIS.srcSeason(year);
+  const rows = ['spring','autumn'].map(key => {
+    const s = EIS.SRC_SEASONS[key];
+    const a = EIS.__srcDay(year, s.startMD), b = EIS.__srcDay(year, s.endMD);
+    const items = events.filter(e => e.season === key).map(e => {
+      const day = Date.UTC(e.date.getUTCFullYear(), e.date.getUTCMonth(),
+                           e.date.getUTCDate()) / 86400000;
+      const pct = ((day - a) / (b - a)) * 100;
+      const iso = e.date.toISOString().slice(0,10);
+      return '<span class="src-tick src-'+e.subtype+'" data-iso="'+iso+
+             '" data-subtype="'+e.subtype+'" title="'+iso+' — '+e.subtype+
+             ' ('+e.genesis+')" style="left:'+pct+'%;background:'+
+             EIS.SRC_COLORS[e.subtype]+'"></span>';
+    }).join('');
+    const label = key === 'spring'
+      ? 'Spring — Apr 3 → May 27 (240 h beat, south → north)'
+      : 'Autumn — Sep 25 → Nov 4 (120 h beat, north → south)';
+    return '<div class="src-row"><div class="src-row-label">'+label+
+           '</div><div class="src-track">'+items+'</div></div>';
+  }).join('');
+
+  host.innerHTML =
+    '<div class="src-cal"><h3>SRC season '+year+' — 15 events</h3>'+rows+
+    '<div class="src-legend">'+
+      Object.keys(EIS.SRC_COLORS).map(k =>
+        '<span><i style="background:'+EIS.SRC_COLORS[k]+'"></i>'+k+'</span>').join('')+
+    '</div>'+
+    '<p class="src-note">Spring runs at half the autumn rate because the same '+
+    '120 h shortwave train runs in both seasons — by April roughly every other '+
+    'member is too unstable to qualify and goes convective. The interval difference '+
+    'is a filtering effect, not a genesis-frequency effect.</p></div>';
+
+  if (onPick){
+    host.querySelectorAll('.src-tick').forEach(el => {
+      el.style.cursor = 'pointer';
+      el.addEventListener('click', () => onPick(el.dataset.iso, el.dataset.subtype));
+    });
+  }
+};
+
+window.__eisTests.push((t) => {
+  const host = document.createElement('div');
+  EIS.renderSrcCalendar(host, 2026);
+  const ticks = host.querySelectorAll('.src-tick');
+  t('calendar renders 15 ticks', ticks.length === 15);
+  t('ticks carry a subtype class',
+    Array.from(ticks).every(el => /src-(SSRC|CSRC|NSRC)/.test(el.className)));
+  t('all three subtypes appear',
+    ['SSRC','CSRC','NSRC'].every(s => host.querySelector('.src-'+s)));
+  t('ticks are clickable', Array.from(ticks).every(el => el.dataset.iso));
+
+  // Both rows must be populated, and every tick must sit inside its track.
+  t('calendar draws both season rows', host.querySelectorAll('.src-row').length === 2);
+  t('ticks stay inside their track', Array.from(ticks).every(el => {
+    const pct = parseFloat(el.style.left);
+    return pct >= 0 && pct <= 100;
+  }));
+
+  // The migration must be visible as position, not just colour: in the autumn
+  // row the northern events sit left of the southern ones.
+  const autumnTicks = Array.from(host.querySelectorAll('.src-row')[1]
+    .querySelectorAll('.src-tick'));
+  const leftOf = (s) => Math.min(...autumnTicks
+    .filter(el => el.dataset.subtype === s).map(el => parseFloat(el.style.left)));
+  t('autumn NSRC events sit left of autumn SSRC events',
+    leftOf('NSRC') < leftOf('SSRC'));
+
+  // onPick is what wires a tick to a re-run.
+  let picked = null;
+  const host2 = document.createElement('div');
+  EIS.renderSrcCalendar(host2, 2026, (iso, sub) => { picked = {iso, sub}; });
+  host2.querySelector('.src-tick').dispatchEvent(new Event('click'));
+  t('clicking a tick reports its ISO date', !!picked && /^\d{4}-\d\d-\d\d$/.test(picked.iso));
+  t('clicking a tick reports its subtype',
+    !!picked && ['SSRC','CSRC','NSRC'].indexOf(picked.sub) !== -1);
+  t('a picked date re-parses to the same UTC day', !!picked &&
+    EIS.srcParseDate(picked.iso + 'T02:00').toISOString().slice(0,10) === picked.iso);
+});
+
 // The seven SRC records. Full derivations in docs/glossary.md.
 // `bearing` is carried per-record, NOT defaulted from subtype: both latitude
 // extremes reach their extremes through bearing rather than date.
@@ -1517,11 +1610,31 @@ EIS.init = function(){
   if (/(\?|&)selftest\b/.test(location.search)) return; // harness owns the page
   const aside = document.getElementById('inputs');
   const main = document.getElementById('results');
-  main.innerHTML = '<div id="map"></div><div id="timeline"></div>';
+  main.innerHTML = '<div id="map"></div><div id="srccal"></div><div id="timeline"></div>';
   EIS.buildForm(aside);
+  const cal = main.querySelector('#srccal');
   function run(){
-    const result = EIS.simulate(EIS.readForm(aside));
+    const inputs = EIS.readForm(aside);
+    const result = EIS.simulate(inputs);
     EIS.renderMap(main.querySelector('#map'), result.steps);
+    if (inputs.srcMode){
+      cal.style.display = '';
+      EIS.renderSrcCalendar(cal, EIS.srcParseDate(inputs.advisoryISO).getUTCFullYear(),
+        (iso, subtype) => {
+          aside.querySelector('#f_advisoryISO').value = iso + 'T02:00';
+          aside.querySelector('#f_srcSubtype').value = subtype;
+          const st = EIS.SRC_SUBTYPES[subtype];
+          aside.querySelector('#f_latitudeDeg').value = st.lat;
+          aside.querySelector('#f_lonDeg').value = st.lon;
+          aside.querySelector('#f_steeringDirDeg').value = st.defaultBearing;
+          aside.querySelector('#f_srcRecord').value = '';
+          EIS.updateSrcWarning(aside);
+          run();
+        });
+    } else {
+      cal.style.display = 'none';
+      cal.innerHTML = '';
+    }
     EIS.renderTimeline(main, result);
   }
   aside.querySelector('#f_run').addEventListener('click', run);
