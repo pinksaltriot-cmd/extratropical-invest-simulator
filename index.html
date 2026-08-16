@@ -873,6 +873,77 @@ window.__eisTests.push((t, approx) => {
   t('rate does not scale with stepH', approx(r6.rateInHr, r1.rateInHr, 1e-9));
 });
 
+// Core generator windows. HARD DATES, not "late September" — the event count and
+// the 4/8/3 subtype split both depend on these exact boundaries.
+EIS.SRC_SEASONS = {
+  autumn: { startMD:[9,25],  endMD:[11,4], intervalH:120 },
+  spring: { startMD:[4,3],   endMD:[5,27], intervalH:240 },
+};
+// Records fall up to 11 days outside the core windows, so classification accepts
+// a shoulder. Observed range: Sep 17 - Nov 15 and Mar 23 - Jun 3.
+EIS.SRC_SHOULDER_DAYS = 14;
+
+EIS.__srcDay = function(year, md){ return Date.UTC(year, md[0]-1, md[1]) / 86400000; };
+
+EIS.srcSeasonOf = function(date){
+  const y = date.getUTCFullYear();
+  const day = Date.UTC(y, date.getUTCMonth(), date.getUTCDate()) / 86400000;
+  const sh = EIS.SRC_SHOULDER_DAYS;
+  for (const key of ['autumn','spring']){
+    const s = EIS.SRC_SEASONS[key];
+    const a = EIS.__srcDay(y, s.startMD), b = EIS.__srcDay(y, s.endMD);
+    if (day >= a - sh && day <= b + sh) return key;
+  }
+  return null;
+};
+
+// Season-warmth: 1 = most summer-like end of the window, 0 = most winter-like.
+// Autumn runs summer -> winter, so warmth is the inverse of position. Values can
+// fall outside [0,1] for exceptional shoulder events; that is how records classify.
+EIS.srcSeasonWarmth = function(date){
+  const key = EIS.srcSeasonOf(date);
+  if (!key) return null;
+  const s = EIS.SRC_SEASONS[key];
+  const y = date.getUTCFullYear();
+  const a = EIS.__srcDay(y, s.startMD), b = EIS.__srcDay(y, s.endMD);
+  const day = Date.UTC(y, date.getUTCMonth(), date.getUTCDate()) / 86400000;
+  const p = (day - a) / (b - a);
+  return key === 'autumn' ? 1 - p : p;
+};
+
+// Subtype follows the sun: events nearer summer form further north. This is what
+// keeps every subtype inside the 50F criterion — an NSRC in late October would
+// produce sleet, an SSRC in late September would go convective.
+// Cut points 0.2/0.8 are fixed by St. Louis 2022 at w = 0.74 being a CSRC.
+EIS.srcSubtypeFor = function(date){
+  const w = EIS.srcSeasonWarmth(date);
+  if (w === null) return null;
+  if (w < 0.2) return 'SSRC';
+  if (w <= 0.8) return 'CSRC';
+  return 'NSRC';
+};
+
+window.__eisTests.push((t, approx) => {
+  const cls = (iso) => EIS.srcSubtypeFor(new Date(iso));
+
+  // All seven records must classify correctly. Six fall OUTSIDE the core windows,
+  // so `w` extrapolates past [0,1] — that is intended, not a bug.
+  t('St. Louis 2022-05-13 is CSRC',   cls('2022-05-13T02:00') === 'CSRC');
+  t('Aberdeen 2018-09-17 is NSRC',    cls('2018-09-17T02:00') === 'NSRC');
+  t('Minot 2024-09-21 is NSRC',       cls('2024-09-21T02:00') === 'NSRC');
+  t('Texarkana 2014-11-15 is SSRC',   cls('2014-11-15T02:00') === 'SSRC');
+  t('Fort Worth 2020-03-23 is SSRC',  cls('2020-03-23T02:00') === 'SSRC');
+  t('San Angelo 2012-03-30 is SSRC',  cls('2012-03-30T02:00') === 'SSRC');
+  t('Pierre 2016-06-03 is NSRC',      cls('2016-06-03T02:00') === 'NSRC');
+
+  t('midsummer has no SRC season', cls('2026-07-15T02:00') === null);
+  t('midwinter has no SRC season', cls('2026-01-15T02:00') === null);
+
+  // St. Louis is the constraint that fixes the 0.2/0.8 cut points.
+  t('St. Louis sits at w = 0.74',
+    approx(EIS.srcSeasonWarmth(new Date('2022-05-13T02:00')), 0.741, 0.01));
+});
+
 // Rainfall duration at a FIXED POINT (Eulerian), distinct from system lifetime
 // (Lagrangian). A point offset `offsetMi` from the track axis cuts a chord
 // 2*sqrt(r^2 - d^2) through the shield; the centerline chord is the full diameter.
