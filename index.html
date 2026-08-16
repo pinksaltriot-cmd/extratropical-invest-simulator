@@ -724,6 +724,40 @@ EIS.SRC_SUBTYPES = {
           bandMin:119, bandMax:160, defaultBearing:135 },
 };
 
+window.__eisTests.push((t, approx) => {
+  // The defining identity: shield chord / speed. Both range extremes land exactly.
+  t('80 mi at 40 mph = 2.0 h', approx(EIS.srcPointDuration(40, 40, 0), 2.0, 1e-9));
+  t('90 mi at 30 mph = 3.0 h', approx(EIS.srcPointDuration(45, 30, 0), 3.0, 1e-9));
+  t('85 mi at 35 mph in range', (() => {
+    const d = EIS.srcPointDuration(42.5, 35, 0);
+    return d >= 2.0 && d <= 3.0;
+  })());
+  // Off-centerline points cut a shorter chord.
+  const centre = EIS.srcPointDuration(42.5, 35, 0);
+  const half   = EIS.srcPointDuration(42.5, 35, 21.25);
+  t('half-radius offset is shorter', half < centre);
+  t('half-radius chord is ~1.73r', approx(half/centre, Math.sqrt(0.75), 1e-6));
+  t('offset beyond radius is zero', EIS.srcPointDuration(42.5, 35, 50) === 0);
+  // Accumulation scales with the chord, so off-axis totals fall under 0.2 in.
+  t('centerline accum is ~0.2 in', approx(EIS.srcAccumulation(0.08, centre), 0.2, 0.03));
+  t('off-axis accum is below centerline',
+    EIS.srcAccumulation(0.08, half) < EIS.srcAccumulation(0.08, centre));
+});
+
+// Rainfall duration at a FIXED POINT (Eulerian), distinct from system lifetime
+// (Lagrangian). A point offset `offsetMi` from the track axis cuts a chord
+// 2*sqrt(r^2 - d^2) through the shield; the centerline chord is the full diameter.
+EIS.srcPointDuration = function(radiusMi, speedMph, offsetMi){
+  const d = Math.abs(offsetMi || 0);
+  if (d >= radiusMi) return 0;
+  const chordMi = 2 * Math.sqrt(radiusMi*radiusMi - d*d);
+  return chordMi / speedMph;
+};
+
+EIS.srcAccumulation = function(rateInHr, durationH){
+  return Math.round(rateInHr * durationH * 100) / 100;
+};
+
 EIS.init = function(){
   if (/(\?|&)selftest\b/.test(location.search)) return; // harness owns the page
   const aside = document.getElementById('inputs');
