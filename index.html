@@ -58,6 +58,10 @@
   .src-legend{display:flex;gap:14px;font-size:11px;margin-top:6px}
   .src-legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
   .src-note{font-size:11px;opacity:.65;line-height:1.5;margin:10px 0 0}
+  .src-budget{background:#0f1720;border:1px solid #1f2d3d;border-radius:8px;padding:12px;margin:12px 0}
+  .src-budget-main{font-size:15px;margin-bottom:5px}
+  .src-budget-alt{font-size:12px;opacity:.7;margin-bottom:5px}
+  .src-sub{font-size:11px;opacity:.6}
 </style>
 </head>
 <body>
@@ -1467,6 +1471,89 @@ window.__eisTests.push((t) => {
     EIS.srcParseDate(picked.iso + 'T02:00').toISOString().slice(0,10) === picked.iso);
 });
 
+// Two figures, deliberately. The centerline ideal is UNREACHABLE, not merely
+// optimistic: the three subtypes run divergent corridors, so no single location
+// lies on all of them. A CSRC-corridor town is exposed to at most the 8 CSRC
+// events and intercepts roughly half, with off-axis hits under 0.2 in.
+EIS.SRC_ANNUAL_PRECIP_IN = { lo: 30, hi: 36 };
+EIS.SRC_EVENT_ACCUM_IN = 0.2;
+
+EIS.srcBudget = function(year){
+  const season = EIS.srcSeason(year);
+  const byType = {};
+  season.forEach(e => { byType[e.subtype] = (byType[e.subtype]||0) + 1; });
+  const maxCorridorEvents = Math.max(...Object.values(byType));
+  const centerlineIn = season.length * EIS.SRC_EVENT_ACCUM_IN;
+  const A = EIS.SRC_ANNUAL_PRECIP_IN;
+  const pct = (inches, denom) => Math.round(inches/denom*1000)/10;
+  // Realistic: one corridor only, roughly half of it intercepted. There is no
+  // further off-axis discount — SRC_EVENT_ACCUM_IN is ALREADY the ~0.2 in a real
+  // interception yields, so discounting again would double-count the geometry
+  // and push the share to 1.8-2.1%, below the 2-4% this model claims.
+  const realisticIn = maxCorridorEvents * EIS.SRC_EVENT_ACCUM_IN * 0.5;
+  return {
+    year, events: season.length, byType, maxCorridorEvents,
+    centerlineIn, centerlineUnreachable: true,
+    centerlinePctLo: pct(centerlineIn, A.hi), centerlinePctHi: pct(centerlineIn, A.lo),
+    realisticIn: Math.round(realisticIn*100)/100,
+    realisticPctLo: pct(realisticIn, A.hi), realisticPctHi: pct(realisticIn, A.lo),
+  };
+};
+
+// The reachable figure leads and is set larger. Leading with the centerline
+// share would overstate what any real location receives.
+EIS.renderSrcBudget = function(host, year){
+  const b = EIS.srcBudget(year);
+  host.innerHTML =
+    '<div class="src-budget">'+
+    '<div class="src-budget-main"><strong>'+b.realisticPctLo+'–'+b.realisticPctHi+
+      '%</strong> of annual precipitation at a fixed point '+
+      '<span class="src-sub">('+b.realisticIn.toFixed(2)+' in/yr)</span></div>'+
+    '<div class="src-budget-alt">Centerline ideal '+b.centerlineIn.toFixed(1)+
+      ' in — '+b.centerlinePctLo+'–'+b.centerlinePctHi+'% — '+
+      '<em>unreachable: no location lies on all three corridors</em></div>'+
+    '<div class="src-sub">'+b.events+' events/yr · '+
+      Object.keys(b.byType).map(k=>k+' '+b.byType[k]).join(' · ')+
+      ' · max corridor exposure '+b.maxCorridorEvents+'</div></div>';
+};
+
+window.__eisTests.push((t, approx) => {
+  const b = EIS.srcBudget(2026);
+  t('15 events', b.events === 15);
+  t('centerline total is 3.0 in', approx(b.centerlineIn, 3.0, 0.01));
+  t('centerline share is 8-10%', b.centerlinePctLo >= 8 && b.centerlinePctHi <= 10);
+  t('realistic share is 2-4%', b.realisticPctLo >= 2 && b.realisticPctHi <= 4);
+  t('realistic is below centerline', b.realisticPctHi < b.centerlinePctLo);
+  t('centerline is flagged unreachable', b.centerlineUnreachable === true);
+  t('max exposure is the CSRC count', b.maxCorridorEvents === 8);
+
+  // The realistic figure is one corridor, half intercepted. The off-axis
+  // reduction is NOT applied a second time here: SRC_EVENT_ACCUM_IN is already
+  // the ~0.2 in a real interception delivers. Stacking a further 0.8 drops the
+  // share to 1.8-2.1% and contradicts the 2-4% band asserted above.
+  t('realistic is one corridor at half interception',
+    approx(b.realisticIn, b.maxCorridorEvents * EIS.SRC_EVENT_ACCUM_IN * 0.5, 0.001));
+  t('realistic is well under the centerline total', b.realisticIn < b.centerlineIn);
+
+  // Rendering: the reachable number must lead, because showing only the
+  // centerline share would overstate what any real location receives.
+  const host = document.createElement('div');
+  EIS.renderSrcBudget(host, 2026);
+  const html = host.innerHTML;
+  t('budget renders the realistic share first',
+    html.indexOf('src-budget-main') < html.indexOf('src-budget-alt'));
+  t('budget leads with the realistic percentage',
+    host.querySelector('.src-budget-main').textContent
+        .indexOf(b.realisticPctLo + '–' + b.realisticPctHi + '%') !== -1);
+  t('budget labels the centerline unreachable',
+    host.querySelector('.src-budget-alt').textContent.indexOf('unreachable') !== -1);
+  t('the centerline share never appears in the lead line',
+    host.querySelector('.src-budget-main').textContent
+        .indexOf(String(b.centerlinePctHi)) === -1);
+  t('budget reports the per-subtype split',
+    host.textContent.indexOf('CSRC 8') !== -1);
+});
+
 // The seven SRC records. Full derivations in docs/glossary.md.
 // `bearing` is carried per-record, NOT defaulted from subtype: both latitude
 // extremes reach their extremes through bearing rather than date.
@@ -1610,16 +1697,21 @@ EIS.init = function(){
   if (/(\?|&)selftest\b/.test(location.search)) return; // harness owns the page
   const aside = document.getElementById('inputs');
   const main = document.getElementById('results');
-  main.innerHTML = '<div id="map"></div><div id="srccal"></div><div id="timeline"></div>';
+  main.innerHTML = '<div id="map"></div><div id="srcbudget"></div>' +
+                   '<div id="srccal"></div><div id="timeline"></div>';
   EIS.buildForm(aside);
   const cal = main.querySelector('#srccal');
+  const budget = main.querySelector('#srcbudget');
   function run(){
     const inputs = EIS.readForm(aside);
     const result = EIS.simulate(inputs);
+    const year = EIS.srcParseDate(inputs.advisoryISO).getUTCFullYear();
     EIS.renderMap(main.querySelector('#map'), result.steps);
     if (inputs.srcMode){
+      budget.style.display = '';
+      EIS.renderSrcBudget(budget, year);
       cal.style.display = '';
-      EIS.renderSrcCalendar(cal, EIS.srcParseDate(inputs.advisoryISO).getUTCFullYear(),
+      EIS.renderSrcCalendar(cal, year,
         (iso, subtype) => {
           aside.querySelector('#f_advisoryISO').value = iso + 'T02:00';
           aside.querySelector('#f_srcSubtype').value = subtype;
@@ -1632,8 +1724,8 @@ EIS.init = function(){
           run();
         });
     } else {
-      cal.style.display = 'none';
-      cal.innerHTML = '';
+      cal.style.display = 'none'; cal.innerHTML = '';
+      budget.style.display = 'none'; budget.innerHTML = '';
     }
     EIS.renderTimeline(main, result);
   }
