@@ -67,8 +67,9 @@
 <body>
 <header>
   <span style="font-size:20px">🌀</span>
-  <h1>Extratropical Invest Simulator</h1>
-  <span class="sub">deterministic cold-core life-cycle model</span>
+  <h1 id="apptitle">Extratropical Invest Simulator</h1>
+  <span class="sub" id="appsub">deterministic cold-core life-cycle model</span>
+  <button id="langToggle" style="margin-left:auto;font-size:12px;padding:5px 10px;background:var(--panel2);color:var(--ink);border:1px solid var(--edge);border-radius:5px;cursor:pointer">🗣️ Yoopanese</button>
 </header>
 
 <div class="app" id="app">
@@ -618,44 +619,179 @@ EIS.intensityColor = function(f){
   const m=(k)=>Math.round(a[k]+(b[k]-a[k])*tt);
   return 'rgb('+m(0)+','+m(1)+','+m(2)+')';
 };
+/* ================= YOOPANESE (language toggle) ================= */
+// Display-only translation layer. Every number, key, id and region/precip code the
+// engine reads stays English and untouched; only the words a person reads are swapped,
+// at render time. English is the default, and the self-test always runs in English.
+// ?lang=yooper or the header button switches it.
+EIS.lang = (function(){
+  if (/(\?|&)selftest\b/.test(location.search)) return 'en';
+  const q = /(?:\?|&)lang=(yooper|en)\b/.exec(location.search);
+  if (q) return q[1];
+  try { return localStorage.getItem('eis.lang') === 'yooper' ? 'yooper' : 'en'; } catch(e){ return 'en'; }
+})();
+EIS.YOOPER = {
+  // header
+  'Extratropical Invest Simulator':'Extratropical Invest Simulator, Eh?',
+  'deterministic cold-core life-cycle model':'cold-core lows from start ta finish · same knobs, same storm, every time',
+  // form
+  'Environment':'Da Setup',
+  'Mode':'What kinda ting',
+  'Extratropical invest':'Big ol’ low (extratropical invest)',
+  'Steady Rain Cycle':'Steady Rain Cycle (just a gentle one)',
+  'Subtype':'Which kind',
+  'NSRC — North (Cheyenne, NE)':'NSRC — Up Nort’ (Cheyenne, NE)',
+  'CSRC — Central (Denver, E)':'CSRC — In Da Middle (Denver, E)',
+  'SSRC — South (Pueblo, SE)':'SSRC — Down Below (Pueblo, SE)',
+  'Lifetime (h)':'How long she lasts (h)',
+  'Notable event':'Ones ta remember',
+  '— none —':'— nuttin’ —',
+  'Surface':'What’s underneath',
+  'Sea':'Big water',
+  'Land':'Solid ground',
+  'Sea-surface temp (°F)':'How warm’s da water (°F)',
+  'Land temp (°F)':'How warm’s da ground (°F)',
+  'Baroclinicity':'Baroclinicity (da warm-cold fight)',
+  'Wind shear (mph)':'Wind shear, how she twists (mph)',
+  'Ambient humidity (%)':'How muggy she is (%)',
+  'Position & motion':'Where at an’ where to',
+  'Latitude (°)':'Latitude, nort’-sout’ (°)',
+  'Longitude (°)':'Longitude, east-west (°)',
+  'Steering dir (° from N)':'Which way she’s headed (° from N)',
+  'Steering speed (mph)':'How fast she’s goin’ (mph)',
+  'Invest':'Da Invest',
+  'Strength':'How strong',
+  'Advisory time':'When dey put out da word',
+  '▶ Simulate lifecycle':'▶ Let ’er rip',
+  // SRC warnings (the model's own caveats, kept plain)
+  '⚠ Outside both SRC seasons — SRCs form only in transition seasons.':
+    '⚠ Dat’s outside both SRC seasons — dese only form in da in-between seasons, ya know.',
+  '⚠ Exceptional: outside the core window (Sep 25–Nov 4 / Apr 3–May 27).':
+    '⚠ Holy wah, a rare one: outside da core window (Sep 25–Nov 4 / Apr 3–May 27).',
+  '⚠ Speed outside 30–40 mph breaks the 2–3 h point-duration window.':
+    '⚠ Speed outside 30–40 mph, so she won’t rain da usual 2–3 h in one spot.',
+  // record labels
+  'Farthest east':'Way out east',
+  'Earliest in fall':'First one in da fall',
+  'Latest in fall':'Last one in da fall',
+  'Earliest in spring':'First one in da spring',
+  'Latest in spring':'Last one in da spring',
+  'Southernmost':'Farthest down below',
+  'Northernmost':'Farthest up nort’',
+  // storm regions
+  'Comma head':'Da comma head',
+  'Warm front':'Da warm front',
+  'Cold front':'Da cold front',
+  'Warm sector':'Da warm side',
+  // precip types
+  'Light rain':'Bit o’ rain',
+  'Moderate rain':'Steady rain',
+  'Heavy rain':'Real downpour',
+  'Light snow':'Just a skiff',
+  'Moderate snow':'Good snow, eh',
+  'Heavy snow':'Heavy snow, holy wah',
+  'Light drizzle':'Bit o’ drizzle',
+  'Moderate drizzle':'Drizzly',
+  'Heavy drizzle':'Real drizzly',
+  'Ice / freezing rain':'Ice / freezin’ rain',
+  'Sleet':'Sleet',
+  'Snow grains':'Snow grains',
+  'Hail':'Hail',
+  'Thunderstorms':'T’understorms',
+  'Thundersnow':'T’undersnow',
+  'Fog':'Foggy',
+  'Haze':'Hazy',
+  'Mist':'Misty',
+  // life-cycle phase
+  'organizing':'gettin’ organized',
+  'deepening':'deepenin’',
+  'bombing out':'bombin’ out, holy wah',
+  'at peak':'at ’er worst',
+  'occluding':'wrappin’ up',
+  'dissipating':'peterin’ out',
+  'steady':'steady, eh',
+  // core + size
+  'cold-core':'cold in da middle',
+  'warm seclusion':'warm pocket in da middle',
+  'compact':'small',
+  'average':'regular',
+  'broad':'real big',
+  'rain shield':'rain shield',
+  // timeline
+  'Core pressure':'Pressure in da middle',
+  'Winds':'Wind',
+  'Size':'How big',
+  'Location':'Where at',
+  'Core temp':'Temp in da middle',
+  'Formation':'Odds she forms',
+  'Region':'Where in da storm',
+  'Type':'What’s comin’ down',
+  'Rate / accum':'How fast / how much',
+};
+EIS.L = function(s){
+  if (EIS.lang !== 'yooper') return s;
+  return Object.prototype.hasOwnProperty.call(EIS.YOOPER, s) ? EIS.YOOPER[s] : s;
+};
+EIS.yooper = function(){ return EIS.lang === 'yooper'; };
+EIS.setLang = function(lang){
+  EIS.lang = lang === 'yooper' ? 'yooper' : 'en';
+  try { localStorage.setItem('eis.lang', EIS.lang); } catch(e){}
+  EIS._applyChrome();
+  if (EIS._relang) EIS._relang();   // set by init; absent under ?selftest
+};
+EIS._applyChrome = function(){
+  const t = EIS.L('Extratropical Invest Simulator');
+  document.title = t;
+  document.documentElement.lang = EIS.yooper() ? 'en-x-yooper' : 'en';
+  const h = document.getElementById('apptitle'); if (h) h.textContent = t;
+  const s = document.getElementById('appsub');
+  if (s) s.textContent = EIS.L('deterministic cold-core life-cycle model');
+  const b = document.getElementById('langToggle');
+  if (b){
+    b.textContent = EIS.yooper() ? '🗣️ English' : '🗣️ Yoopanese';
+    b.title = EIS.yooper() ? 'Switch back ta English' : 'Switch to Yoopanese (Upper Peninsula dialect)';
+  }
+};
+
 /* ================= UI (Tasks 11-13) ================= */
 
 EIS.buildForm = function(aside){
+  const L = EIS.L;
   aside.innerHTML = `
-    <h2 class="sec">Environment</h2>
-    <label>Mode <select id="f_mode">
-      <option value="invest">Extratropical invest</option>
-      <option value="src">Steady Rain Cycle</option>
+    <h2 class="sec">${L('Environment')}</h2>
+    <label>${L('Mode')} <select id="f_mode">
+      <option value="invest">${L('Extratropical invest')}</option>
+      <option value="src">${L('Steady Rain Cycle')}</option>
     </select></label>
     <div id="src_panel" style="display:none;border-left:3px solid #1e6091;padding-left:10px;margin:8px 0">
-      <label>Subtype <select id="f_srcSubtype">
-        <option value="NSRC">NSRC — North (Cheyenne, NE)</option>
-        <option value="CSRC" selected>CSRC — Central (Denver, E)</option>
-        <option value="SSRC">SSRC — South (Pueblo, SE)</option>
+      <label>${L('Subtype')} <select id="f_srcSubtype">
+        <option value="NSRC">${L('NSRC — North (Cheyenne, NE)')}</option>
+        <option value="CSRC" selected>${L('CSRC — Central (Denver, E)')}</option>
+        <option value="SSRC">${L('SSRC — South (Pueblo, SE)')}</option>
       </select></label>
-      <label>Lifetime (h) <input id="f_srcLifetimeH" type="number" min="9" max="26" value="12"></label>
-      <label>Notable event <select id="f_srcRecord">
-        <option value="">— none —</option>
+      <label>${L('Lifetime (h)')} <input id="f_srcLifetimeH" type="number" min="9" max="26" value="12"></label>
+      <label>${L('Notable event')} <select id="f_srcRecord">
+        <option value="">${L('— none —')}</option>
       </select></label>
       <div id="src_warn" style="color:#fbbf24;font-size:12px;margin-top:6px"></div>
     </div>
-    <label>Surface <select id="f_surfaceType"><option value="sea">Sea</option><option value="land">Land</option></select></label>
-    <label><span id="f_tempLabel">Sea-surface temp (°F)</span>
+    <label>${L('Surface')} <select id="f_surfaceType"><option value="sea">${L('Sea')}</option><option value="land">${L('Land')}</option></select></label>
+    <label><span id="f_tempLabel">${L('Sea-surface temp (°F)')}</span>
       <input id="f_surfaceTempF" type="number" value="52"></label>
-    <label>Baroclinicity <output id="f_baroOut">70</output>
+    <label>${L('Baroclinicity')} <output id="f_baroOut">70</output>
       <input id="f_baroclinicity" type="range" min="0" max="100" value="70"></label>
-    <label>Wind shear (mph) <input id="f_shearMph" type="number" value="22"></label>
-    <label>Ambient humidity (%) <input id="f_humidityPct" type="number" value="80"></label>
-    <h2 class="sec">Position &amp; motion</h2>
-    <label>Latitude (°) <input id="f_latitudeDeg" type="number" value="44"></label>
-    <label>Longitude (°) <input id="f_lonDeg" type="number" value="-58"></label>
-    <label>Steering dir (° from N) <input id="f_steeringDirDeg" type="number" value="60"></label>
-    <label>Steering speed (mph) <input id="f_steeringMph" type="number" value="30"></label>
-    <h2 class="sec">Invest</h2>
-    <label>Strength <output id="f_strOut">45</output> (0–100)
+    <label>${L('Wind shear (mph)')} <input id="f_shearMph" type="number" value="22"></label>
+    <label>${L('Ambient humidity (%)')} <input id="f_humidityPct" type="number" value="80"></label>
+    <h2 class="sec">${EIS.yooper() ? L('Position & motion') : 'Position &amp; motion'}</h2>
+    <label>${L('Latitude (°)')} <input id="f_latitudeDeg" type="number" value="44"></label>
+    <label>${L('Longitude (°)')} <input id="f_lonDeg" type="number" value="-58"></label>
+    <label>${L('Steering dir (° from N)')} <input id="f_steeringDirDeg" type="number" value="60"></label>
+    <label>${L('Steering speed (mph)')} <input id="f_steeringMph" type="number" value="30"></label>
+    <h2 class="sec">${L('Invest')}</h2>
+    <label>${L('Strength')} <output id="f_strOut">45</output> (0–100)
       <input id="f_investStrength" type="range" min="0" max="100" value="45"></label>
-    <label>Advisory time <input id="f_advisoryISO" type="datetime-local" value="2026-01-10T18:00"></label>
-    <button id="f_run" style="margin-top:14px;width:100%;padding:10px;background:#1e6091;color:#dff;border:none;border-radius:6px;font-weight:700;cursor:pointer">▶ Simulate lifecycle</button>
+    <label>${L('Advisory time')} <input id="f_advisoryISO" type="datetime-local" value="2026-01-10T18:00"></label>
+    <button id="f_run" style="margin-top:14px;width:100%;padding:10px;background:#1e6091;color:#dff;border:none;border-radius:6px;font-weight:700;cursor:pointer">${L('▶ Simulate lifecycle')}</button>
   `;
   // live-updating range outputs + sea/land temp label
   const bind = (id,out)=>{ const i=aside.querySelector('#'+id), o=aside.querySelector('#'+out);
@@ -663,14 +799,14 @@ EIS.buildForm = function(aside){
   bind('f_baroclinicity','f_baroOut'); bind('f_investStrength','f_strOut');
   aside.querySelector('#f_surfaceType').addEventListener('change',e=>{
     aside.querySelector('#f_tempLabel').textContent =
-      (e.target.value==='sea'?'Sea-surface':'Land')+' temp (°F)';
+      EIS.L(e.target.value==='sea'?'Sea-surface temp (°F)':'Land temp (°F)');
   });
 
   const recSel = aside.querySelector('#f_srcRecord');
   EIS.SRC_RECORDS.forEach(r => {
     const o = document.createElement('option');
     o.value = r.key;
-    o.textContent = r.label + ' — ' + r.city + ' (' + r.dateISO.slice(0,10) + ')';
+    o.textContent = EIS.L(r.label) + ' — ' + r.city + ' (' + r.dateISO.slice(0,10) + ')';
     recSel.appendChild(o);
   });
 
@@ -749,20 +885,23 @@ EIS.updateSrcWarning = function(root){
   const date = EIS.srcParseDate(root.querySelector('#f_advisoryISO').value);
   const w = EIS.srcSeasonWarmth(date);
   if (w === null){
-    msgs.push('⚠ Outside both SRC seasons — SRCs form only in transition seasons.');
+    msgs.push(EIS.L('⚠ Outside both SRC seasons — SRCs form only in transition seasons.'));
   } else if (w < 0 || w > 1){
-    msgs.push('⚠ Exceptional: outside the core window (Sep 25–Nov 4 / Apr 3–May 27).');
+    msgs.push(EIS.L('⚠ Exceptional: outside the core window (Sep 25–Nov 4 / Apr 3–May 27).'));
   }
   const spd = +root.querySelector('#f_steeringMph').value;
   if (spd < EIS.SRC.SPEED_MIN || spd > EIS.SRC.SPEED_MAX){
-    msgs.push('⚠ Speed outside 30–40 mph breaks the 2–3 h point-duration window.');
+    msgs.push(EIS.L('⚠ Speed outside 30–40 mph breaks the 2–3 h point-duration window.'));
   }
   const sub = root.querySelector('#f_srcSubtype').value;
   const st = EIS.SRC_SUBTYPES[sub];
   const brg = +root.querySelector('#f_steeringDirDeg').value;
   if (brg < st.bandMin || brg > st.bandMax){
-    msgs.push('⚠ Bearing ' + brg + '° is outside the ' + sub +
-              ' band (' + st.bandMin + '–' + st.bandMax + '°).');
+    msgs.push(EIS.yooper()
+      ? '⚠ Headin’ ' + brg + '° is outside da ' + sub +
+        ' band (' + st.bandMin + '–' + st.bandMax + '°), eh.'
+      : '⚠ Bearing ' + brg + '° is outside the ' + sub +
+        ' band (' + st.bandMin + '–' + st.bandMax + '°).');
   }
   el.innerHTML = msgs.join('<br>');
 };
@@ -989,14 +1128,15 @@ EIS.fmtDate = function(iso){
   return d.toLocaleString(undefined,{weekday:'short',month:'short',day:'numeric',hour:'numeric'});
 };
 EIS.renderTimeline = function(main, result){
+  const L = EIS.L, Y = EIS.yooper();
   const rows = result.steps.map((s,i)=>{
     const peak = i===result.peakIndex ? ' ★' : '';
     const regionRows = s.regions.map(rg=>{
       const m = EIS.PRECIP_META[rg.type];
       const amt = rg.water==='none' ? '—' :
         rg.rateInHr+' in/hr &middot; '+rg.accumIn+' in';
-      return `<tr><td>${rg.region}</td>
-        <td style="color:${m.color};font-weight:600">${m.emoji} ${m.label}</td>
+      return `<tr><td>${L(rg.region)}</td>
+        <td style="color:${m.color};font-weight:600">${m.emoji} ${L(m.label)}</td>
         <td>${amt}</td></tr>`;
     }).join('');
     const trend = s.pressureTrend24<=0 ? '▼ '+Math.abs(s.pressureTrend24) : '▲ '+s.pressureTrend24;
@@ -1005,25 +1145,31 @@ EIS.renderTimeline = function(main, result){
         <span class="tt">+${s.tHours}h &middot; ${EIS.fmtDate(s.date)}${peak}</span>
         <span class="pill">\u{1F300} ${s.formationPct}%</span>
         <span class="pill">${s.pressureMb} mb</span>
-        <span class="pill">${s.coreTempF}°F ${s.coreTag}</span>
-        <span class="pill warm">${s.phaseNote}</span>
+        <span class="pill">${s.coreTempF}°F ${L(s.coreTag)}</span>
+        <span class="pill warm">${L(s.phaseNote)}</span>
       </div>
       <div class="step-body">
         <div class="metrics">
-          <div class="metric"><div class="k">Core pressure</div><div class="v">${s.pressureMb} mb</div><div class="s">${trend} mb/24h</div></div>
-          <div class="metric"><div class="k">Winds</div><div class="v">${s.windMph} mph</div><div class="s">gusts ${s.gustMph}</div></div>
-          <div class="metric"><div class="k">Size</div><div class="v">${s.sizeMi} mi</div><div class="s">gale radius &middot; ${s.sizeCat}</div></div>
-          <div class="metric"><div class="k">Location</div><div class="v">${s.lat}°, ${s.lon}°</div><div class="s">moving ${s.headingDeg}° @ ${s.speedMph} mph</div></div>
-          <div class="metric"><div class="k">Core temp</div><div class="v">${s.coreTempF}°F</div><div class="s">${s.coreTag}</div></div>
-          <div class="metric"><div class="k">Formation</div><div class="v">${s.formationPct}%</div><div class="s">${s.phaseNote}</div></div>
+          <div class="metric"><div class="k">${L('Core pressure')}</div><div class="v">${s.pressureMb} mb</div><div class="s">${trend} mb/24h</div></div>
+          <div class="metric"><div class="k">${L('Winds')}</div><div class="v">${s.windMph} mph</div><div class="s">${Y?'gusts ta':'gusts'} ${s.gustMph}</div></div>
+          <div class="metric"><div class="k">${L('Size')}</div><div class="v">${s.sizeMi} mi</div><div class="s">${Y?'gale reach':'gale radius'} &middot; ${L(s.sizeCat)}</div></div>
+          <div class="metric"><div class="k">${L('Location')}</div><div class="v">${s.lat}°, ${s.lon}°</div><div class="s">${Y?'headin’':'moving'} ${s.headingDeg}° @ ${s.speedMph} mph</div></div>
+          <div class="metric"><div class="k">${L('Core temp')}</div><div class="v">${s.coreTempF}°F</div><div class="s">${L(s.coreTag)}</div></div>
+          <div class="metric"><div class="k">${L('Formation')}</div><div class="v">${s.formationPct}%</div><div class="s">${L(s.phaseNote)}</div></div>
         </div>
-        <table class="precip"><tr><th>Region</th><th>Type</th><th>Rate / accum</th></tr>${regionRows}</table>
-        <div class="totals">Storm totals — snow ${s.stormTotals.snowIn} in &middot; liquid ${s.stormTotals.liquidIn} in</div>
+        <table class="precip"><tr><th>${L('Region')}</th><th>${L('Type')}</th><th>${L('Rate / accum')}</th></tr>${regionRows}</table>
+        <div class="totals">${Y
+          ? `Da whole storm — snow ${s.stormTotals.snowIn} in &middot; wet stuff ${s.stormTotals.liquidIn} in`
+          : `Storm totals — snow ${s.stormTotals.snowIn} in &middot; liquid ${s.stormTotals.liquidIn} in`}</div>
       </div>
     </div>`;
   }).join('');
   const pk = result.steps[result.peakIndex];
-  const summary = `<div class="summary">
+  const summary = Y ? `<div class="summary">
+    At ’er worst: <b>${pk.pressureMb} mb</b>, <b>${pk.windMph} mph</b> at +${pk.tHours}h &middot;
+    lasted ${result.steps[result.steps.length-1].tHours}h &middot;
+    best odds she forms ${Math.max(...result.steps.map(s=>s.formationPct))}%</div>`
+    : `<div class="summary">
     Peak: <b>${pk.pressureMb} mb</b>, <b>${pk.windMph} mph</b> at +${pk.tHours}h &middot;
     life ${result.steps[result.steps.length-1].tHours}h &middot;
     max formation ${Math.max(...result.steps.map(s=>s.formationPct))}%</div>`;
@@ -1038,7 +1184,12 @@ EIS.renderTimeline = function(main, result){
     // steps.length counts hour 0, so it is lifetime + 1. The last step's tHours
     // IS the lifetime — reporting steps.length would print 13 h for a 12 h system.
     const lifeH = result.steps[result.steps.length-1].tHours;
-    host.insertAdjacentHTML('afterbegin',
+    host.insertAdjacentHTML('afterbegin', Y ?
+      '<div class="src-budget"><div class="src-budget-main">How long it rains in one '+
+      'spot: <strong>'+d.toFixed(1)+' h</strong> (right down da middle)</div>'+
+      '<div class="src-sub">Right down da middle ya get '+acc.toFixed(2)+' in. '+
+      'Off ta da side, ya cut a shorter slice through da shield an’ get less, ya know. '+
+      'Da whole system lasts '+lifeH+' h — dat’s a different ting.</div></div>' :
       '<div class="src-budget"><div class="src-budget-main">Rainfall duration at a '+
       'point: <strong>'+d.toFixed(1)+' h</strong> (centerline)</div>'+
       '<div class="src-sub">Centerline accumulation '+acc.toFixed(2)+' in. '+
@@ -1591,6 +1742,7 @@ EIS.SRC_COLORS = { NSRC:'#60a5fa', CSRC:'#4ade80', SSRC:'#fbbf24' };
 // Colored by subtype so the north->south (autumn) and south->north (spring)
 // migration is visible without reading a table.
 EIS.renderSrcCalendar = function(host, year, onPick){
+  const Y = EIS.yooper();
   const events = EIS.srcSeason(year);
   const rows = ['spring','autumn'].map(key => {
     const s = EIS.SRC_SEASONS[key];
@@ -1605,23 +1757,32 @@ EIS.renderSrcCalendar = function(host, year, onPick){
              ' ('+e.genesis+')" style="left:'+pct+'%;background:'+
              EIS.SRC_COLORS[e.subtype]+'"></span>';
     }).join('');
-    const label = key === 'spring'
-      ? 'Spring — Apr 3 → May 27 (240 h beat, south → north)'
-      : 'Autumn — Sep 25 → Nov 4 (120 h beat, north → south)';
+    const label = Y
+      ? (key === 'spring'
+        ? 'Spring — Apr 3 → May 27 (240 h beat, sout’ → nort’)'
+        : 'Fall — Sep 25 → Nov 4 (120 h beat, nort’ → sout’)')
+      : (key === 'spring'
+        ? 'Spring — Apr 3 → May 27 (240 h beat, south → north)'
+        : 'Autumn — Sep 25 → Nov 4 (120 h beat, north → south)');
     return '<div class="src-row"><div class="src-row-label">'+label+
            '</div><div class="src-track">'+items+'</div></div>';
   }).join('');
 
   host.innerHTML =
-    '<div class="src-cal"><h3>SRC season '+year+' — 15 events</h3>'+rows+
+    '<div class="src-cal"><h3>SRC season '+year+(Y ? ' — 15 of ’em' : ' — 15 events')+'</h3>'+rows+
     '<div class="src-legend">'+
       Object.keys(EIS.SRC_COLORS).map(k =>
         '<span><i style="background:'+EIS.SRC_COLORS[k]+'"></i>'+k+'</span>').join('')+
     '</div>'+
-    '<p class="src-note">Spring runs at half the autumn rate because the same '+
+    (Y
+    ? '<p class="src-note">Spring runs half as often as fall because da same '+
+      '120 h train o’ shortwaves runs in both seasons — come April, about every other '+
+      'one is too unstable ta count an’ goes t’understorm instead. So da gap is da '+
+      'weedin’ out, not fewer storms gettin’ started, eh.</p></div>'
+    : '<p class="src-note">Spring runs at half the autumn rate because the same '+
     '120 h shortwave train runs in both seasons — by April roughly every other '+
     'member is too unstable to qualify and goes convective. The interval difference '+
-    'is a filtering effect, not a genesis-frequency effect.</p></div>';
+    'is a filtering effect, not a genesis-frequency effect.</p></div>');
 
   if (onPick){
     host.querySelectorAll('.src-tick').forEach(el => {
@@ -1707,6 +1868,20 @@ EIS.srcBudget = function(year){
 // share would overstate what any real location receives.
 EIS.renderSrcBudget = function(host, year){
   const b = EIS.srcBudget(year);
+  if (EIS.yooper()){
+    host.innerHTML =
+      '<div class="src-budget">'+
+      '<div class="src-budget-main"><strong>'+b.realisticPctLo+'–'+b.realisticPctHi+
+        '%</strong> o’ da whole year’s rain an’ snow in one spot '+
+        '<span class="src-sub">('+b.realisticIn.toFixed(2)+' in/yr)</span></div>'+
+      '<div class="src-budget-alt">Right-down-da-middle dream '+b.centerlineIn.toFixed(1)+
+        ' in — '+b.centerlinePctLo+'–'+b.centerlinePctHi+'% — '+
+        '<em>ain’t gonna happen: no spot sits on all tree corridors</em></div>'+
+      '<div class="src-sub">'+b.events+' of ’em a year · '+
+        Object.keys(b.byType).map(k=>k+' '+b.byType[k]).join(' · ')+
+        ' · most any one corridor sees '+b.maxCorridorEvents+'</div></div>';
+    return;
+  }
   host.innerHTML =
     '<div class="src-budget">'+
     '<div class="src-budget-main"><strong>'+b.realisticPctLo+'–'+b.realisticPctHi+
@@ -1998,6 +2173,28 @@ EIS.init = function(){
     EIS.renderTimeline(main, result);
   }
   aside.querySelector('#f_run').addEventListener('click', run);
+  // Language switch: rebuild the form in the new words, then put every value the
+  // user had back exactly as it was (values and option keys never change), and
+  // re-render. Nothing the engine reads is translated, so the run is identical.
+  EIS._relang = function(){
+    const vals = {};
+    aside.querySelectorAll('input[id],select[id]').forEach(el => { vals[el.id] = el.value; });
+    const panelShown = aside.querySelector('#src_panel').style.display;
+    const open = Array.from(main.querySelectorAll('.step.open')).map(el => el.dataset.i);
+    EIS.buildForm(aside);
+    Object.keys(vals).forEach(id => { const el = aside.querySelector('#'+id); if (el) el.value = vals[id]; });
+    aside.querySelector('#src_panel').style.display = panelShown;
+    // Replay the display-only listeners (range readouts, temp label); never 'change'
+    // on #f_mode, which would reseat the SRC defaults.
+    aside.querySelector('#f_baroclinicity').dispatchEvent(new Event('input'));
+    aside.querySelector('#f_investStrength').dispatchEvent(new Event('input'));
+    aside.querySelector('#f_surfaceType').dispatchEvent(new Event('change'));
+    EIS.updateSrcWarning(aside);
+    aside.querySelector('#f_run').addEventListener('click', run);
+    run();
+    main.querySelectorAll('.step').forEach(el =>
+      el.classList.toggle('open', open.indexOf(el.dataset.i) !== -1));
+  };
   // Let the user set the start point by clicking the map.
   main.querySelector('#map').addEventListener('click', (e)=>{
     const svg = e.target.closest('svg'); if(!svg) return;
@@ -2010,7 +2207,85 @@ EIS.init = function(){
   });
   run(); // initial simulation on load
 };
+EIS._applyChrome();
+{ const lt = document.getElementById('langToggle');
+  if (lt) lt.onclick = () => EIS.setLang(EIS.lang === 'yooper' ? 'en' : 'yooper'); }
 EIS.init();
+
+/* ===== YOOPANESE: display-only language toggle ===== */
+window.__eisTests.push((t) => {
+  t('selftest runs in English', EIS.lang === 'en');
+  t('English lookups are the identity', EIS.L('Heavy snow') === 'Heavy snow' &&
+    EIS.L('Comma head') === 'Comma head' && EIS.L('no such string') === 'no such string');
+
+  const nums = s => (String(s).match(/-?\d+(\.\d+)?/g) || []).join(',');
+  const tl = inputs => { const d = document.createElement('div');
+    d.innerHTML = '<div id="timeline"></div>'; EIS.renderTimeline(d, EIS.simulate(inputs)); return d; };
+  const cal = () => { const d = document.createElement('div'); EIS.renderSrcCalendar(d, 2026); return d; };
+  const bud = () => { const d = document.createElement('div'); EIS.renderSrcBudget(d, 2026); return d; };
+  const warn = () => { const f = EIS.__mkForm(); const m = f.querySelector('#f_mode');
+    m.value = 'src'; m.dispatchEvent(new Event('change'));
+    f.querySelector('#f_steeringMph').value = 50; f.querySelector('#f_steeringDirDeg').value = 200;
+    f.querySelector('#f_advisoryISO').value = '2026-07-15T02:00';
+    EIS.updateSrcWarning(f); return f.querySelector('#src_warn'); };
+  const snap = () => ({ form: EIS.__mkForm(), inv: tl(EIS.DEFAULT_INPUTS),
+    src: tl(EIS.SRC_DEFAULT_INPUTS), cal: cal(), bud: bud(), warn: warn() });
+
+  const en = snap();
+  t('English page still says the English words',
+    en.form.textContent.indexOf('Simulate lifecycle') !== -1 &&
+    en.inv.textContent.indexOf('Core pressure') !== -1 &&
+    en.inv.textContent.indexOf('Peak:') !== -1);
+
+  let yp;
+  EIS.lang = 'yooper';
+  try { yp = snap(); } finally { EIS.lang = 'en'; }
+
+  t('yooper form swaps the words', yp.form.textContent.indexOf('Let ’er rip') !== -1 &&
+    yp.form.textContent.indexOf('Simulate lifecycle') === -1 &&
+    yp.form.textContent.indexOf('Big water') !== -1);
+  t('yooper timeline swaps the words', yp.inv.textContent.indexOf('Pressure in da middle') !== -1 &&
+    yp.inv.textContent.indexOf('Core pressure') === -1 &&
+    yp.inv.textContent.indexOf('At ’er worst') !== -1);
+  t('yooper region + precip names swap', yp.inv.textContent.indexOf('Da comma head') !== -1 &&
+    yp.inv.textContent.indexOf('Comma head') === -1);
+  t('yooper SRC banner swaps the words',
+    yp.src.textContent.indexOf('How long it rains in one spot') !== -1 &&
+    yp.src.textContent.indexOf('Rainfall duration') === -1);
+  t('yooper calendar + budget swap the words',
+    yp.cal.textContent.indexOf('nort’ → sout’') !== -1 &&
+    yp.bud.textContent.indexOf('ain’t gonna happen') !== -1 &&
+    yp.bud.textContent.indexOf('unreachable') === -1);
+  t('yooper warnings swap the words', yp.warn.textContent.indexOf('Headin’') !== -1 &&
+    yp.warn.textContent.indexOf('won’t rain') !== -1 && yp.warn.textContent.indexOf('Bearing') === -1);
+
+  // The load-bearing check: every number a person sees is identical in both languages.
+  ['form','inv','src','cal','bud','warn'].forEach(k => {
+    t('same numbers in both languages: ' + k,
+      nums(en[k].textContent) === nums(yp[k].textContent) && nums(en[k].textContent).length > 0);
+  });
+  t('yooper form reads back the exact same inputs',
+    JSON.stringify(EIS.readForm(en.form)) === JSON.stringify(EIS.readForm(yp.form)));
+  t('yooper form keeps every option value',
+    JSON.stringify(Array.from(en.form.querySelectorAll('option')).map(o => o.value)) ===
+    JSON.stringify(Array.from(yp.form.querySelectorAll('option')).map(o => o.value)));
+  t('yooper timeline keeps its structure',
+    en.inv.querySelectorAll('.step').length === yp.inv.querySelectorAll('.step').length &&
+    en.inv.innerHTML.replace(/>[^<]*</g,'><') === yp.inv.innerHTML.replace(/>[^<]*</g,'><'));
+
+  const has = s => Object.prototype.hasOwnProperty.call(EIS.YOOPER, s);
+  t('every precip label has a yooper word',
+    Object.keys(EIS.PRECIP_META).every(k => has(EIS.PRECIP_META[k].label)));
+  t('every region has a yooper word', EIS.REGIONS.every(has));
+  t('every phase note has a yooper word',
+    ['organizing','deepening','bombing out','at peak','occluding','dissipating','steady'].every(has));
+  t('every core tag + size class has a yooper word',
+    ['cold-core','warm seclusion','compact','average','broad','rain shield'].every(has));
+  t('every record label has a yooper word', EIS.SRC_RECORDS.every(r => has(r.label)));
+  t('voice rule: never "youse"', Object.keys(EIS.YOOPER).every(k => !/\byouse\b/i.test(EIS.YOOPER[k])));
+  t('back to English after the test', EIS.lang === 'en' &&
+    tl(EIS.DEFAULT_INPUTS).textContent.indexOf('Core pressure') !== -1);
+});
 
 /* ================= SELF-TEST HARNESS ================= */
 (function(){
